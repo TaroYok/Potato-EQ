@@ -1,0 +1,16 @@
+POTATO EQ - installing
+
+Windows (FL Studio, Ableton, Reaper, Studio One, Cubase, Bitwig ...)
+  1. Copy the "Potato EQ.vst3" folder to:  C:\Program Files\Common Files\VST3
+  2. In FL Studio: Options > Manage plugins > Find more plugins (or Find installed plugins).
+     Potato EQ appears under Effects. Other DAWs rescan VST3 on start-up.
+  "Potato EQ.exe" is a standalone version for quick testing without a DAW.
+
+macOS (Logic uses the .component / AU, everything else the .vst3)
+  1. Copy "Potato EQ.vst3"      to  ~/Library/Audio/Plug-Ins/VST3
+     Copy "Potato EQ.component" to  ~/Library/Audio/Plug-Ins/Components
+  2. The plugin isn't signed by Apple yet, so macOS will block it the first time.
+     Open Terminal and run:
+       xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Potato EQ.vst3"
+       xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/"Potato EQ.component"
+  3. Restart your DAW.

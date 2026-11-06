@@ -1,0 +1,92 @@
+name: Build plugin
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            cmake_args: -A x64
+          - name: macOS
+            os: macos-latest
+            cmake_args: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          - name: Linux
+            os: ubuntu-24.04
+            cmake_args: -DPOTATO_BUILD_HARNESS=ON -G Ninja
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build xvfb libasound2-dev libjack-jackd2-dev libx11-dev libxcomposite-dev \
+            libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev libxi-dev \
+            libfreetype-dev libfontconfig1-dev libgl1-mesa-dev
+
+      - name: Cache JUCE download
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-9.0.5-${{ runner.os }}
+
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_args }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: DSP tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Full plugin check + screenshot (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a -s "-screen 0 1600x1000x24" build/potato_harness_artefacts/Release/potato_harness screenshot.png
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          A=build/PotatoEQ_artefacts/Release
+          cp -R "$A/VST3/Potato EQ.vst3" dist/
+          if [ -d "$A/AU/Potato EQ.component" ]; then cp -R "$A/AU/Potato EQ.component" dist/; fi
+          if [ -f "$A/Standalone/Potato EQ.exe" ]; then cp "$A/Standalone/Potato EQ.exe" dist/; fi
+          if [ -d "$A/Standalone/Potato EQ.app" ]; then cp -R "$A/Standalone/Potato EQ.app" dist/; fi
+          if [ -f screenshot.png ]; then cp screenshot.png dist/; fi
+          cp INSTALL.txt dist/
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: PotatoEQ-${{ matrix.name }}
+          path: dist
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Zip
+        run: cd artifacts && for d in */; do (cd "$d" && zip -qr "../${d%/}.zip" .); done
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
