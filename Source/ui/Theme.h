@@ -35,4 +35,32 @@ inline juce::String freqText (double f)
 {
     return f >= 1000 ? juce::String (f / 1000.0, f >= 10000 ? 1 : 2) + " kHz" : juce::String (f, f < 100 ? 1 : 0) + " Hz";
 }
+
+// "A1 +12c" style note name (A4 = 440 Hz)
+inline juce::String noteName (double f)
+{
+    if (f <= 0) return {};
+    static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    const double midi = 69.0 + 12.0 * std::log2 (f / 440.0);
+    const int n = (int) std::lround (midi);
+    const int cents = (int) std::lround ((midi - n) * 100.0);
+    juce::String s = juce::String (names[((n % 12) + 12) % 12]) + juce::String (n / 12 - 1);
+    if (cents != 0) s << " " << (cents > 0 ? "+" : "") << cents << "c";
+    return s;
+}
+
+// Analyzer display settings live as properties on the plugin state (saved with the project).
+namespace ana
+{
+    inline const juce::Identifier freeze ("anaFreeze"), peakHold ("anaPeakHold"), resolution ("anaRes"),
+                                  speed ("anaSpeed"), tilt ("anaTilt"), range ("anaRange");
+    inline const juce::StringArray resolutionNames { "Low", "Medium", "High", "Maximum" };   // FFT 2k/4k/8k/16k
+    inline const juce::StringArray speedNames { "Slow", "Medium", "Fast" };
+    inline const juce::StringArray tiltNames { "0 dB/oct", "3 dB/oct", "4.5 dB/oct", "6 dB/oct" };
+    inline const juce::StringArray rangeNames { "60 dB", "90 dB", "120 dB" };
+    inline const double tiltValues[] = { 0.0, 3.0, 4.5, 6.0 };
+    inline const double rangeValues[] = { 60.0, 90.0, 120.0 };
+    inline int get (const juce::ValueTree& s, const juce::Identifier& id, int def) { return (int) s.getProperty (id, def); }
+}
 } // namespace theme
+namespace ana = theme::ana;

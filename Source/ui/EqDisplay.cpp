@@ -8,10 +8,8 @@ static constexpr int kColStep = 2;
 
 EqDisplay::EqDisplay (PotatoEQProcessor& p) : proc (p)
 {
-    preRing.assign (kFftSize, 0.0f); postRing.assign (kFftSize, 0.0f);
-    fftData.assign (2 * kFftSize, 0.0f);
-    window.resize (kFftSize);
-    for (int i = 0; i < kFftSize; ++i) window[(size_t) i] = 0.5f - 0.5f * std::cos (MathConstants<float>::twoPi * (float) i / kFftSize);
+    for (auto* s : { &pre, &post }) s->ring.assign (kMaxSize, 0.0f);
+    fftData.assign (2 * kMaxSize, 0.0f);
     setOpaque (true);
     startTimerHz (30);
 }
@@ -28,29 +26,52 @@ double EqDisplay::displayRange() const
 }
 float EqDisplay::yForGain (double db) const { auto a = plotArea(); return a.getCentreY() - (float) (db / displayRange()) * (a.getHeight() * 0.46f); }
 double EqDisplay::gainForY (float y) const { auto a = plotArea(); return (a.getCentreY() - y) / (a.getHeight() * 0.46f) * displayRange(); }
-float EqDisplay::yForSpectrum (double db) const { auto a = plotArea(); return a.getY() + a.getHeight() * (float) jlimit (0.0, 1.0, (6.0 - db) / 96.0); }
+float EqDisplay::yForSpectrum (double db) const
+{
+    const double range = ana::rangeValues[jlimit (0, 2, setting (ana::range, 1))];
+    auto a = plotArea();
+    return a.getY() + a.getHeight() * (float) jlimit (0.0, 1.0, (6.0 - db) / (range + 6.0));
+}
 
 void EqDisplay::resized()
 {
     const int cols = jmax (1, (int) plotArea().getWidth() / kColStep + 1);
-    preDisplay.assign ((size_t) cols, -120.0f);
-    postDisplay.assign ((size_t) cols, -120.0f);
+    for (auto* s : { &pre, &post }) { s->display.assign ((size_t) cols, -150.0f); s->peak.assign ((size_t) cols, -150.0f); }
 }
 
-void EqDisplay::pullSpectrum (SampleFifo& fifo, std::vector<float>& ring, int& pos, std::vector<float>& display)
+void EqDisplay::clearPeakHold()
+{
+    for (auto* s : { &pre, &post }) std::fill (s->peak.begin(), s->peak.end(), -150.0f);
+}
+
+void EqDisplay::pullSpectrum (SampleFifo& fifo, Spectrum& s, bool analyse)
 {
     float tmp[4096];
     int got;
     while ((got = fifo.pull (tmp, 4096)) > 0)
-        for (int i = 0; i < got; ++i) { ring[(size_t) pos] = tmp[i]; pos = (pos + 1) % kFftSize; }
+        for (int i = 0; i < got; ++i) { s.ring[(size_t) s.pos] = tmp[i]; s.pos = (s.pos + 1) % kMaxSize; }
+    if (! analyse || s.display.empty()) return;
 
-    for (int i = 0; i < kFftSize; ++i) fftData[(size_t) i] = ring[(size_t) ((pos + i) % kFftSize)] * window[(size_t) i];
-    std::fill (fftData.begin() + kFftSize, fftData.end(), 0.0f);
-    fft.performFrequencyOnlyForwardTransform (fftData.data(), true);
+    const int order = fftOrder, size = 1 << order;
+    if (ffts[(size_t) order] == nullptr) ffts[(size_t) order] = std::make_unique<dsp::FFT> (order);
+    if ((int) window.size() != size)
+    {
+        window.resize ((size_t) size);
+        for (int i = 0; i < size; ++i) window[(size_t) i] = 0.5f - 0.5f * std::cos (MathConstants<float>::twoPi * (float) i / (float) size);
+    }
+    for (int i = 0; i < size; ++i) fftData[(size_t) i] = s.ring[(size_t) ((s.pos - size + i + kMaxSize) % kMaxSize)] * window[(size_t) i];
+    std::fill (fftData.begin() + size, fftData.begin() + 2 * size, 0.0f);
+    ffts[(size_t) order]->performFrequencyOnlyForwardTransform (fftData.data(), true);
 
-    const double fs = proc.getFs(), binHz = fs / kFftSize;
+    const double fs = proc.getFs(), binHz = fs / size;
+    s.bins.assign (fftData.begin(), fftData.begin() + size / 2 + 1);
+    s.binHz = binHz;
+    const double tilt = ana::tiltValues[jlimit (0, 3, setting (ana::tilt, 2))];
+    static const float release[] = { 0.05f, 0.12f, 0.3f }, attack[] = { 0.45f, 0.6f, 0.9f };
+    const int sp = jlimit (0, 2, setting (ana::speed, 1));
+    const bool hold = setting (ana::peakHold, 0) != 0;
     const auto a = plotArea();
-    for (size_t c = 0; c < display.size(); ++c)
+    for (size_t c = 0; c < s.display.size(); ++c)
     {
         const float x0 = a.getX() + (float) c * kColStep;
         const double f0 = freqForX (x0), f1 = freqForX (x0 + kColStep);
@@ -59,39 +80,98 @@ void EqDisplay::pullSpectrum (SampleFifo& fifo, std::vector<float>& ring, int& p
         if (b1 - b0 <= 1)
         {   // fewer bins than pixels at the low end: interpolate
             const double fb = 0.5 * (f0 + f1) / binHz;
-            const int k = jlimit (0, kFftSize / 2 - 1, (int) fb);
+            const int k = jlimit (0, size / 2 - 1, (int) fb);
             const float t = (float) (fb - k);
             m = fftData[(size_t) k] * (1 - t) + fftData[(size_t) k + 1] * t;
         }
-        else for (int k = jmax (0, b0); k <= jmin (kFftSize / 2, b1); ++k) m = jmax (m, fftData[(size_t) k]);
+        else for (int k = jmax (0, b0); k <= jmin (size / 2, b1); ++k) m = jmax (m, fftData[(size_t) k]);
 
         const double fc = 0.5 * (f0 + f1);
-        double db = Decibels::gainToDecibels (m * 4.0f / kFftSize, -150.0f) + 4.5 * std::log2 (fc / 1000.0);   // 4.5 dB/oct tilt, like most mastering analyzers
-        auto& d = display[c];
-        d = (float) (db > d ? d + (db - d) * 0.6 : d + (db - d) * 0.12);
+        const double db = Decibels::gainToDecibels (m * 4.0f / (float) size, -150.0f) + tilt * std::log2 (fc / 1000.0);
+        auto& d = s.display[c];
+        d = (float) (db > d ? d + (db - d) * attack[sp] : d + (db - d) * release[sp]);
+        s.peak[c] = hold ? jmax (s.peak[c], d) : -150.0f;
     }
 }
 
 void EqDisplay::timerCallback()
 {
     const int mode = (int) proc.apvts.getRawParameterValue (params::id::analyzer)->load();
-    if (mode == 1 || mode == 3) pullSpectrum (proc.preFifo, preRing, prePos, preDisplay);
-    else { float t[4096]; while (proc.preFifo.pull (t, 4096) > 0) {} }
-    if (mode == 2 || mode == 3) pullSpectrum (proc.postFifo, postRing, postPos, postDisplay);
-    else { float t[4096]; while (proc.postFifo.pull (t, 4096) > 0) {} }
+    const bool frozen = setting (ana::freeze, 0) != 0 || grabbing;
+    const int wantOrder = 11 + jlimit (0, 3, setting (ana::resolution, 2));
+    if (wantOrder != fftOrder) fftOrder = wantOrder;
+    pullSpectrum (proc.preFifo, pre, ! frozen && (mode == 1 || mode == 3));
+    pullSpectrum (proc.postFifo, post, ! frozen && (mode == 2 || mode == 3));
     for (int b = 0; b < arc::kNumBands; ++b) bands[(size_t) b] = proc.bandSettings (b);
+    if (mouseInside && dragging < 0 && hovered < 0) findPeakNear (mousePos);
     repaint();
 }
 
-Point<float> EqDisplay::nodePosition (int band, const arc::BandSettings& b) const
+const EqDisplay::Spectrum* EqDisplay::grabSource() const
+{
+    const int mode = (int) proc.apvts.getRawParameterValue (params::id::analyzer)->load();
+    if (mode == 1) return &pre;
+    if (mode == 2 || mode == 3) return &post;
+    return nullptr;
+}
+
+// Finds a clear spectral peak close to the mouse (for spectrum grab).
+void EqDisplay::findPeakNear (Point<float> pt)
+{
+    hoverPeak = {};
+    const auto* s = grabSource();
+    if (s == nullptr || s->display.empty()) return;
+    const auto a = plotArea();
+    const int n = (int) s->display.size();
+    const int centre = (int) ((pt.x - a.getX()) / kColStep);
+    int best = -1; float bestDb = -1e9f;
+    for (int c = jmax (3, centre - 8); c <= jmin (n - 4, centre + 8); ++c)
+    {
+        const float v = s->display[(size_t) c];
+        bool isMax = true; float lo = v;
+        for (int d = -3; d <= 3 && isMax; ++d) if (d != 0 && s->display[(size_t) (c + d)] > v) isMax = false;
+        if (! isMax) continue;
+        for (int d = -12; d <= 12; ++d) { const int j = c + d; if (j >= 0 && j < n) lo = jmin (lo, s->display[(size_t) j]); }
+        if (v - lo < 5.0f || v < -110.0f) continue;   // needs some prominence to count as a peak
+        if (v > bestDb) { bestDb = v; best = c; }
+    }
+    if (best < 0) return;
+    float x = a.getX() + (float) best * kColStep + kColStep * 0.5f;
+    // refine on the raw FFT bins: strongest bin near the column, then parabolic interpolation (in dB)
+    if (s->bins.size() > 8)
+    {
+        const double approx = freqForX (x);
+        const int k0 = (int) std::lround (approx / s->binHz);
+        const int span = jmax (2, (int) std::ceil (approx * 0.06 / s->binHz));
+        int k = -1; float kv = 0;
+        for (int j = jmax (1, k0 - span); j <= jmin ((int) s->bins.size() - 2, k0 + span); ++j)
+            if (s->bins[(size_t) j] > kv) { kv = s->bins[(size_t) j]; k = j; }
+        if (k > 0)
+        {
+            const float l = Decibels::gainToDecibels (s->bins[(size_t) k - 1], -200.0f), c0 = Decibels::gainToDecibels (kv, -200.0f),
+                        rr = Decibels::gainToDecibels (s->bins[(size_t) k + 1], -200.0f);
+            const float den = l - 2 * c0 + rr;
+            const float off = std::abs (den) > 1e-6f ? jlimit (-0.5f, 0.5f, 0.5f * (l - rr) / den) : 0.0f;
+            const double f = ((double) k + off) * s->binHz;
+            if (f > kLoHz && f < kHiHz) x = xForFreq (f);
+        }
+    }
+    const float y = yForSpectrum (bestDb);
+    if (std::abs (y - pt.y) > 45.0f) return;
+    hoverPeak.valid = true;
+    hoverPeak.freq = freqForX (x);
+    hoverPeak.db = bestDb;
+    hoverPeak.pt = { x, y };
+}
+
+Point<float> EqDisplay::nodePosition (const arc::BandSettings& b) const
 {
     const double fs = proc.getFs();
     const double scale = proc.apvts.getRawParameterValue (params::id::gainScale)->load() / 100.0;
     double y;
-    if (arc::typeHasGain (b.type)) y = b.type == arc::BandType::TiltShelf ? 0.0 : b.gainDb * scale;
+    if (b.type == arc::BandType::TiltShelf) y = 0.0;
+    else if (arc::typeHasGain (b.type)) y = b.gainDb * scale;
     else y = jlimit (-displayRange(), displayRange(), arc::designBand (b, 0, fs).magnitudeDb (b.freq, fs));
-    if (b.type == arc::BandType::LowShelf || b.type == arc::BandType::HighShelf) y = b.gainDb * scale;
-    (void) band;
     return { xForFreq (b.freq), jlimit (plotArea().getY() + 4, plotArea().getBottom() - 4, yForGain (y)) };
 }
 
@@ -108,21 +188,23 @@ void EqDisplay::paint (Graphics& g)
     for (double f : { 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0,
                       1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0, 8000.0, 9000.0, 10000.0, 20000.0 })
     {
-        const bool major = f == 20 || f == 50 || f == 100 || f == 200 || f == 500 || f == 1000 || f == 2000 || f == 5000 || f == 10000 || f == 20000;
+        const int fi = (int) f;
+        const bool major = fi == 20 || fi == 50 || fi == 100 || fi == 200 || fi == 500 || fi == 1000 || fi == 2000 || fi == 5000 || fi == 10000 || fi == 20000;
         const float x = xForFreq (f);
         g.setColour (theme::grid.withAlpha (major ? 1.0f : 0.45f));
         g.drawVerticalLine ((int) x, a.getY(), a.getBottom());
         if (major)
         {
             g.setColour (theme::gridText);
-            g.drawText (f >= 1000 ? String ((int) (f / 1000)) + "k" : String ((int) f), Rectangle<float> (x - 20, a.getBottom() + 1, 40, 12), Justification::centred);
+            g.drawText (fi >= 1000 ? String (fi / 1000) + "k" : String (fi), Rectangle<float> (x - 20, a.getBottom() + 1, 40, 12), Justification::centred);
         }
     }
     const double step = range <= 3 ? 1 : range <= 6 ? 2 : range <= 12 ? 3 : 6;
-    for (double d = -range; d <= range + 0.01; d += step)
+    for (int k = -(int) std::round (range / step); k <= (int) std::round (range / step); ++k)
     {
+        const double d = k * step;
         const float y = yForGain (d);
-        g.setColour (d == 0 ? theme::grid.brighter (0.25f) : theme::grid);
+        g.setColour (k == 0 ? theme::grid.brighter (0.25f) : theme::grid);
         g.drawHorizontalLine ((int) y, a.getX(), a.getRight());
         g.setColour (theme::gridText);
         g.drawText ((d > 0 ? "+" : "") + String ((int) d), Rectangle<float> (a.getRight() + 2, y - 6, 24, 12), Justification::centredLeft);
@@ -130,23 +212,37 @@ void EqDisplay::paint (Graphics& g)
 
     // spectrum
     const int mode = (int) proc.apvts.getRawParameterValue (params::id::analyzer)->load();
-    auto drawSpec = [&] (const std::vector<float>& d, Colour c, bool fill)
+    const bool hold = setting (ana::peakHold, 0) != 0;
+    auto specPath = [&] (const std::vector<float>& d, bool closed)
     {
         Path p;
-        p.startNewSubPath (a.getX(), a.getBottom());
-        for (size_t i = 0; i < d.size(); ++i) p.lineTo (a.getX() + (float) i * kColStep, yForSpectrum (d[i]));
-        p.lineTo (a.getRight(), a.getBottom());
-        p.closeSubPath();
+        if (closed) p.startNewSubPath (a.getX(), a.getBottom());
+        for (size_t i = 0; i < d.size(); ++i)
+        {
+            const float x = a.getX() + (float) i * kColStep, y = yForSpectrum (d[i]);
+            if (! closed && i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+        }
+        if (closed) { p.lineTo (a.getRight(), a.getBottom()); p.closeSubPath(); }
+        return p;
+    };
+    auto drawSpec = [&] (const Spectrum& s, Colour c, bool fill)
+    {
+        auto p = specPath (s.display, true);
         if (fill) { g.setGradientFill (ColourGradient (c.withAlpha (0.35f), 0, a.getY(), c.withAlpha (0.05f), 0, a.getBottom(), false)); g.fillPath (p); }
         g.setColour (c.withAlpha (fill ? 0.5f : 0.85f));
         g.strokePath (p, PathStrokeType (1.0f));
+        if (hold)
+        {
+            g.setColour (c.brighter (0.6f).withAlpha (0.7f));
+            g.strokePath (specPath (s.peak, false), PathStrokeType (1.0f));
+        }
     };
-    if (mode == 1 || mode == 3) drawSpec (preDisplay, theme::preSpec, true);
-    if (mode == 2 || mode == 3) drawSpec (postDisplay, theme::postSpec, mode == 2);
+    if (mode == 1 || mode == 3) drawSpec (pre, theme::preSpec, true);
+    if (mode == 2 || mode == 3) drawSpec (post, theme::postSpec, mode == 2);
 
     // curves
     const int cols = (int) (a.getWidth() / 3) + 2;
-    std::vector<double> total ((size_t) cols, 0.0), autoDb ((size_t) cols, 0.0);
+    std::vector<double> total ((size_t) cols, 0.0);
     const auto snap = proc.autoSnapshot();
     const bool autoOn = (int) proc.apvts.getRawParameterValue (params::id::autoMode)->load() != params::autoOff && snap.result.curve.valid;
     const double amount = proc.apvts.getRawParameterValue (params::id::autoAmount)->load() / 100.0;
@@ -181,9 +277,9 @@ void EqDisplay::paint (Graphics& g)
         for (int i = 0; i < cols; ++i)
         {
             const float x = a.getX() + (float) i * 3;
-            autoDb[(size_t) i] = arc::autoCurveDb (snap.result.curve, amount, freqForX (x), fs);
-            total[(size_t) i] += autoDb[(size_t) i];
-            const float y = jlimit (a.getY() - 2, a.getBottom() + 2, yForGain (autoDb[(size_t) i]));
+            const double db = arc::autoCurveDb (snap.result.curve, amount, freqForX (x), fs);
+            total[(size_t) i] += db;
+            const float y = jlimit (a.getY() - 2, a.getBottom() + 2, yForGain (db));
             if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
         }
         Path dashed;
@@ -211,11 +307,11 @@ void EqDisplay::paint (Graphics& g)
     {
         const auto& s = bands[(size_t) b];
         if (! s.used) continue;
-        const auto pos = nodePosition (b, s);
+        const auto pos = nodePosition (s);
         const auto c = theme::bandColour (b);
         const float r = (b == selected || b == hovered) ? 8.5f : 7.0f;
         if (s.dynamic && arc::typeSupportsDynamic (s.type) && ! linear)
-        {   // ring shows the dynamic range target
+        {   // line + ring show where the dynamic range can take the band
             g.setColour (c.withAlpha (0.35f));
             const float yr = yForGain (s.gainDb * scale + s.rangeDb);
             g.drawLine (pos.x, pos.y, pos.x, jlimit (a.getY(), a.getBottom(), yr), 2.0f);
@@ -230,35 +326,59 @@ void EqDisplay::paint (Graphics& g)
         g.drawText (String (b + 1), Rectangle<float> (r * 2, r * 2).withCentre (pos), Justification::centred);
     }
 
-    // hover readout
+    auto tag = [&] (Point<float> at, const String& t, Colour border)
+    {
+        const float w = (float) GlyphArrangement::getStringWidthInt (theme::font (12.0f), t) + 16.0f;
+        Rectangle<float> box (at.x + 12, at.y - 30, w, 20);
+        if (box.getRight() > a.getRight()) box.setX (at.x - 12 - w);
+        if (box.getY() < a.getY()) box.setY (at.y + 12);
+        g.setColour (theme::panel.withAlpha (0.94f)); g.fillRoundedRectangle (box, 4);
+        g.setColour (border.withAlpha (0.6f)); g.drawRoundedRectangle (box, 4, 1);
+        g.setColour (theme::text); g.setFont (theme::font (12.0f));
+        g.drawText (t, box, Justification::centred);
+    };
+
+    // band readout
     const int show = dragging >= 0 ? dragging : hovered;
     if (show >= 0 && bands[(size_t) show].used)
     {
         const auto& s = bands[(size_t) show];
-        const auto pos = nodePosition (show, s);
-        String t = theme::freqText (s.freq);
+        String t = theme::freqText (s.freq) + "  (" + theme::noteName (s.freq) + ")";
         if (arc::typeHasGain (s.type)) t << "   " << (s.gainDb > 0 ? "+" : "") << String (s.gainDb, 1) << " dB";
         t << "   Q " << String (s.q, 2);
-        Rectangle<float> box (pos.x + 12, pos.y - 30, 170, 20);
-        if (box.getRight() > a.getRight()) box.setX (pos.x - 182);
-        if (box.getY() < a.getY()) box.setY (pos.y + 12);
-        g.setColour (theme::panel.withAlpha (0.92f)); g.fillRoundedRectangle (box, 4);
-        g.setColour (theme::text); g.setFont (theme::font (12.0f));
-        g.drawText (t, box, Justification::centred);
+        tag (nodePosition (s), t, theme::bandColour (show));
+    }
+    else if (hoverPeak.valid && mouseInside)
+    {   // spectrum grab target
+        g.setColour (theme::accent);
+        g.drawEllipse (Rectangle<float> (14, 14).withCentre (hoverPeak.pt), 1.6f);
+        g.drawVerticalLine ((int) hoverPeak.pt.x, hoverPeak.pt.y + 7, a.getBottom());
+        tag (hoverPeak.pt, theme::noteName (hoverPeak.freq) + "   " + theme::freqText (hoverPeak.freq) + "   drag to EQ", theme::accent);
+    }
+    else if (mouseInside && a.contains (mousePos) && dragging < 0)
+    {   // cursor readout along the bottom
+        const double f = freqForX (mousePos.x);
+        g.setColour (theme::text.withAlpha (0.15f));
+        g.drawVerticalLine ((int) mousePos.x, a.getY(), a.getBottom());
+        const String t = theme::freqText (f) + "   " + theme::noteName (f) + "   " + (gainForY (mousePos.y) >= 0 ? "+" : "") + String (gainForY (mousePos.y), 1) + " dB";
+        g.setColour (theme::textDim); g.setFont (theme::font (11.0f));
+        g.drawText (t, a.reduced (6, 4).removeFromBottom (14), Justification::bottomRight);
     }
 
-    if (bands.size() > 0 && std::none_of (bands.begin(), bands.end(), [] (auto& s) { return s.used; }))
+    if (std::none_of (bands.begin(), bands.end(), [] (auto& s) { return s.used; }))
     {
         g.setColour (theme::textDim);
         g.setFont (theme::font (14.0f));
-        g.drawText ("Double-click anywhere to add a band.  Drag to move, scroll to change Q, right-click for options, Alt-click to delete.",
+        g.drawText ("Double-click to add a band, or drag a peak in the analyzer.  Scroll = Q, right-click = options, Alt-click = delete.",
                     a.withTrimmedTop (a.getHeight() * 0.62f).withHeight (24), Justification::centred);
     }
-    if (linear)
+    String status;
+    if (linear) status << "Linear phase  (latency " << String (1000.0 * proc.getLatencySamples() / jmax (1.0, fs), 0) << " ms, dynamic bands act static)    ";
+    if (setting (ana::freeze, 0) != 0) status << "ANALYZER FROZEN";
+    if (status.isNotEmpty())
     {
         g.setColour (theme::textDim); g.setFont (theme::font (11.0f));
-        g.drawText ("Linear phase  (latency " + String (1000.0 * proc.getLatencySamples() / jmax (1.0, fs), 0) + " ms, dynamic bands act static)",
-                    a.withHeight (16).translated (6, 2), Justification::left);
+        g.drawText (status, a.withHeight (16).translated (6, 2), Justification::left);
     }
 }
 
@@ -268,7 +388,7 @@ int EqDisplay::hitNode (Point<float> pt) const
     for (int b = 0; b < arc::kNumBands; ++b)
     {
         if (! bands[(size_t) b].used) continue;
-        const float d = nodePosition (b, bands[(size_t) b]).getDistanceFrom (pt);
+        const float d = nodePosition (bands[(size_t) b]).getDistanceFrom (pt);
         if (d < bestD) { bestD = d; best = b; }
     }
     return best;
@@ -287,19 +407,14 @@ void EqDisplay::setParamPlain (int band, const char* what, float v)
     if (auto* p = proc.apvts.getParameter (params::bandId (band, what))) p->setValueNotifyingHost (p->convertTo0to1 (v));
 }
 
-void EqDisplay::addBandAt (Point<float> pt)
+int EqDisplay::addBand (arc::BandType t, double f, double gainDb, double q)
 {
     const int b = proc.bandToFill();
-    if (b < 0) return;
-    const double f = freqForX (pt.x);
-    arc::BandType t = arc::BandType::Bell;
-    if (f < 30) t = arc::BandType::LowCut;
-    else if (f > 16000) t = arc::BandType::HighCut;
-    const double scale = jmax (0.01f, proc.apvts.getRawParameterValue (params::id::gainScale)->load() / 100.0f);
+    if (b < 0) return -1;
     proc.setParam (params::bandId (b, "type"), (float) t);
     proc.setParam (params::bandId (b, "freq"), (float) f);
-    proc.setParam (params::bandId (b, "gain"), t == arc::BandType::Bell ? (float) jlimit (-30.0, 30.0, gainForY (pt.y) / scale) : 0.0f);
-    proc.setParam (params::bandId (b, "q"), t == arc::BandType::Bell ? 1.0f : 0.7071f);
+    proc.setParam (params::bandId (b, "gain"), (float) jlimit (-30.0, 30.0, gainDb));
+    proc.setParam (params::bandId (b, "q"), (float) q);
     proc.setParam (params::bandId (b, "slope"), t == arc::BandType::Bell ? 1.0f : 3.0f);
     proc.setParam (params::bandId (b, "place"), 0.0f);
     proc.setParam (params::bandId (b, "dyn"), 0.0f);
@@ -307,6 +422,7 @@ void EqDisplay::addBandAt (Point<float> pt)
     proc.setParam (params::bandId (b, "used"), 1.0f);
     bands[(size_t) b] = proc.bandSettings (b);
     setSelected (b);
+    return b;
 }
 
 void EqDisplay::deleteBand (int b)
@@ -324,12 +440,13 @@ void EqDisplay::showBandMenu (int b)
     for (int i = 0; i < (int) arc::BandType::Count; ++i) types.addItem (100 + i, arc::bandTypeName ((arc::BandType) i), true, (int) s.type == i);
     for (int i = 0; i < (int) arc::kSlopes.size(); ++i) slopes.addItem (200 + i, String (arc::kSlopes[(size_t) i]) + " dB/oct", arc::typeHasSlope (s.type), s.slope == arc::kSlopes[(size_t) i]);
     for (int i = 0; i < (int) arc::Placement::Count; ++i) places.addItem (300 + i, arc::placementName ((arc::Placement) i), true, (int) s.place == i);
-    m.addSectionHeader ("Band " + String (b + 1));
+    m.addSectionHeader ("Band " + String (b + 1) + "  -  " + theme::noteName (s.freq));
     m.addSubMenu ("Shape", types);
     m.addSubMenu ("Slope", slopes, arc::typeHasSlope (s.type));
     m.addSubMenu ("Stereo", places);
     m.addItem (1, "Dynamic EQ", arc::typeSupportsDynamic (s.type), s.dynamic);
     m.addItem (2, "Bypass", true, s.bypass);
+    m.addItem (4, "Snap to nearest note (" + theme::noteName (440.0 * std::pow (2.0, std::round (12.0 * std::log2 (s.freq / 440.0)) / 12.0)) + ")");
     m.addSeparator();
     m.addItem (3, "Delete");
     SafePointer<EqDisplay> safe (this);
@@ -343,25 +460,36 @@ void EqDisplay::showBandMenu (int b)
         else if (r == 1) pr.setParam (params::bandId (b, "dyn"), s.dynamic ? 0.0f : 1.0f);
         else if (r == 2) pr.setParam (params::bandId (b, "bypass"), s.bypass ? 0.0f : 1.0f);
         else if (r == 3) safe->deleteBand (b);
+        else if (r == 4) pr.setParam (params::bandId (b, "freq"), (float) (440.0 * std::pow (2.0, std::round (12.0 * std::log2 (s.freq / 440.0)) / 12.0)));
     });
 }
 
 void EqDisplay::mouseMove (const MouseEvent& e)
 {
+    mousePos = e.position; mouseInside = true;
     const int h = hitNode (e.position);
-    if (h != hovered) { hovered = h; repaint(); }
-    setMouseCursor (h >= 0 ? MouseCursor::DraggingHandCursor : MouseCursor::CrosshairCursor);
+    if (h != hovered) hovered = h;
+    if (h < 0) findPeakNear (e.position); else hoverPeak = {};
+    setMouseCursor (h >= 0 || hoverPeak.valid ? MouseCursor::DraggingHandCursor : MouseCursor::CrosshairCursor);
+    repaint();
 }
-void EqDisplay::mouseExit (const MouseEvent&) { hovered = -1; repaint(); }
+void EqDisplay::mouseExit (const MouseEvent&) { hovered = -1; mouseInside = false; hoverPeak = {}; repaint(); }
 
 void EqDisplay::mouseDown (const MouseEvent& e)
 {
-    const int h = hitNode (e.position);
+    int h = hitNode (e.position);
+    if (h < 0 && hoverPeak.valid && e.mods.isLeftButtonDown() && ! e.mods.isAltDown())
+    {   // spectrum grab: new narrow bell on the peak, drag up/down to set its gain
+        h = addBand (arc::BandType::Bell, hoverPeak.freq, 0.0, 4.0);
+        if (h < 0) return;
+        grabbing = true;
+    }
     if (h < 0) return;
     setSelected (h);
     if (e.mods.isAltDown() || e.mods.isMiddleButtonDown()) { deleteBand (h); return; }
     if (e.mods.isPopupMenu()) { showBandMenu (h); return; }
     dragging = h;
+    hoverPeak = {};
     dragStart = e.position;
     dragStartFreq = bands[(size_t) h].freq;
     dragStartGain = bands[(size_t) h].gainDb;
@@ -373,14 +501,17 @@ void EqDisplay::mouseDrag (const MouseEvent& e)
     if (dragging < 0) return;
     const auto& s = bands[(size_t) dragging];
     const float fine = e.mods.isShiftDown() ? 0.15f : 1.0f;
-    const auto pos = dragStart + (e.position - dragStart) * fine;
-    const bool lockY = e.mods.isCommandDown();   // Ctrl/Cmd: frequency only
-    setParamPlain (dragging, "freq", (float) jlimit (10.0, 30000.0, freqForX (pos.x)));
-    if (arc::typeHasGain (s.type) && ! lockY)
+    const auto delta = (e.position - dragStart) * fine;
+    // relative moves: the node never jumps to the cursor
+    const bool freqOnly = e.mods.isCommandDown() && ! grabbing;
+    if (! grabbing || std::abs (delta.x) > 6.0f)
+        setParamPlain (dragging, "freq", (float) jlimit (10.0, 30000.0, freqForX (xForFreq (dragStartFreq) + delta.x)));
+    if (arc::typeHasGain (s.type) && ! freqOnly)
     {
         const double scale = jmax (0.01f, proc.apvts.getRawParameterValue (params::id::gainScale)->load() / 100.0f);
-        double g = gainForY (pos.y) / scale;
-        if (s.type == arc::BandType::TiltShelf) g = dragStartGain - (pos.y - dragStart.y) * 0.1;
+        const double dbPerPx = displayRange() / (plotArea().getHeight() * 0.46);
+        double g = dragStartGain - delta.y * dbPerPx / scale;
+        if (s.type == arc::BandType::TiltShelf) g = dragStartGain - delta.y * 0.1;
         setParamPlain (dragging, "gain", (float) jlimit (-30.0, 30.0, g));
     }
     bands[(size_t) dragging] = proc.bandSettings (dragging);
@@ -392,13 +523,19 @@ void EqDisplay::mouseUp (const MouseEvent&)
     if (dragging >= 0)
         for (auto* w : { "freq", "gain" }) if (auto* p = proc.apvts.getParameter (params::bandId (dragging, w))) p->endChangeGesture();
     dragging = -1;
+    grabbing = false;
 }
 
 void EqDisplay::mouseDoubleClick (const MouseEvent& e)
 {
     const int h = hitNode (e.position);
-    if (h >= 0) proc.setParam (params::bandId (h, "bypass"), bands[(size_t) h].bypass ? 0.0f : 1.0f);
-    else if (plotArea().contains (e.position)) addBandAt (e.position);
+    if (h >= 0) { proc.setParam (params::bandId (h, "bypass"), bands[(size_t) h].bypass ? 0.0f : 1.0f); return; }
+    if (! plotArea().contains (e.position)) return;
+    const double f = freqForX (e.position.x);
+    const double scale = jmax (0.01f, proc.apvts.getRawParameterValue (params::id::gainScale)->load() / 100.0f);
+    if (f < 30) addBand (arc::BandType::LowCut, f, 0, 0.7071);
+    else if (f > 16000) addBand (arc::BandType::HighCut, f, 0, 0.7071);
+    else addBand (arc::BandType::Bell, f, gainForY (e.position.y) / scale, 1.0);
 }
 
 void EqDisplay::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)

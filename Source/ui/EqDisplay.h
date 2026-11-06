@@ -2,7 +2,8 @@
 #include "../PluginProcessor.h"
 #include "Theme.h"
 
-// The main curve display: spectrum analyzer, band curves, draggable band nodes.
+// The main curve display: spectrum analyzer, band curves, draggable band nodes,
+// spectrum grab (drag a peak in the analyzer to create a band) and note readouts.
 class EqDisplay : public juce::Component, private juce::Timer
 {
 public:
@@ -21,11 +22,22 @@ public:
 
     int getSelected() const { return selected; }
     void setSelected (int b);
+    void clearPeakHold();
     std::function<void (int)> onSelectionChanged;
 
 private:
+    struct Spectrum
+    {
+        std::vector<float> ring, display, peak, bins;   // bins: last raw FFT magnitudes
+        int pos = 0;
+        double binHz = 1.0;
+    };
+    struct Peak { bool valid = false; double freq = 0, db = 0; juce::Point<float> pt; };
+
     void timerCallback() override;
-    void pullSpectrum (SampleFifo&, std::vector<float>& ring, int& pos, std::vector<float>& display);
+    void pullSpectrum (SampleFifo&, Spectrum&, bool analyse);
+    void findPeakNear (juce::Point<float>);
+    const Spectrum* grabSource() const;
 
     juce::Rectangle<float> plotArea() const;
     float xForFreq (double f) const;
@@ -34,24 +46,27 @@ private:
     double gainForY (float y) const;
     float yForSpectrum (double db) const;
     double displayRange() const;
+    int setting (const juce::Identifier& id, int def) const { return ana::get (proc.apvts.state, id, def); }
 
-    juce::Point<float> nodePosition (int band, const arc::BandSettings&) const;
+    juce::Point<float> nodePosition (const arc::BandSettings&) const;
     int hitNode (juce::Point<float>) const;
-    void addBandAt (juce::Point<float>);
+    int addBand (arc::BandType, double freq, double gainDb, double q);
     void deleteBand (int b);
     void showBandMenu (int b);
     void setParamPlain (int band, const char* what, float v);
 
     PotatoEQProcessor& proc;
     int selected = -1, hovered = -1, dragging = -1;
-    juce::Point<float> dragStart;
+    bool grabbing = false;               // dragging a band created from a spectrum peak
+    juce::Point<float> dragStart, mousePos;
+    bool mouseInside = false;
     double dragStartFreq = 0, dragStartGain = 0;
+    Peak hoverPeak;
 
-    static constexpr int kFftOrder = 13, kFftSize = 1 << kFftOrder;
-    juce::dsp::FFT fft { kFftOrder };
-    std::vector<float> preRing, postRing, fftData, window;
-    int prePos = 0, postPos = 0;
-    std::vector<float> preDisplay, postDisplay;   // dB per plot column
-    juce::Image cache;
+    static constexpr int kMaxOrder = 14, kMaxSize = 1 << kMaxOrder;
+    std::array<std::unique_ptr<juce::dsp::FFT>, kMaxOrder + 1> ffts;
+    int fftOrder = 13;
+    std::vector<float> fftData, window;
+    Spectrum pre, post;
     std::array<arc::BandSettings, arc::kNumBands> bands;
 };

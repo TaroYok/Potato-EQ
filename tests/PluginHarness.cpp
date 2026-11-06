@@ -131,11 +131,18 @@ int main (int argc, char** argv)
     check (placed >= 2 && placed <= 8, "auto curve turned into editable bands", placed, 6);
     check ((int) p->apvts.getRawParameterValue (params::id::autoMode)->load() == params::autoOff, "auto EQ switched off after commit", 0, 0);
 
+    std::puts ("-- note names --");
+    check (theme::noteName (55.0) == "A1", "55 Hz is " + theme::noteName (55.0), 1, 1);
+    check (theme::noteName (261.63) == "C4", "261.63 Hz is " + theme::noteName (261.63), 1, 1);
+    check (theme::noteName (45.0) == "F#1 -47c", "45 Hz is " + theme::noteName (45.0), 1, 1);
+
     std::puts ("-- editor --");
     {
+        p->apvts.state.setProperty (ana::peakHold, 1, nullptr);
+        p->apvts.state.setProperty (ana::resolution, 3, nullptr);   // 16k FFT
         p->setParam (params::id::autoMode, (float) params::autoLearn);
         std::unique_ptr<AudioProcessorEditor> ed (p->createEditor());
-        ed->setSize (1200, 760);
+        ed->setSize (1240, 760);
         for (int i = 0; i < 30; ++i) { run (*p, 0.05, pinkish); pump (30); }
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
         File f (shotPath);
@@ -143,6 +150,44 @@ int main (int argc, char** argv)
         FileOutputStream os (f);
         PNGImageFormat().writeImageToStream (img, os);
         check (f.existsAsFile(), "editor rendered to " + f.getFileName(), 1, 1);
+        // spectrum grab: a 440 Hz tone in the analyzer; clicking its peak and dragging up should create a band there
+        EqDisplay* disp = nullptr;
+        for (auto* c : ed->getChildren()) if (auto* d = dynamic_cast<EqDisplay*> (c)) disp = d;
+        p->setParam (params::id::autoMode, (float) params::autoOff);
+        for (int b = 0; b < arc::kNumBands; ++b) p->setParam (params::bandId (b, "used"), 0.0f);
+        p->apvts.state.setProperty (ana::peakHold, 0, nullptr);
+        long toneN = 0;
+        auto tone = [&] (int) { const long n = toneN++; const float v = (float) (0.25 * std::sin (2 * MathConstants<double>::pi * 440.0 * (double) n / 48000)) + pinkish (n).first * 0.05f; return std::make_pair (v, v); };
+        for (int i = 0; i < 20; ++i) { run (*p, 0.05, tone); pump (30); }
+        auto src = Desktop::getInstance().getMainMouseSource();
+        auto ev = [&] (Point<float> pt, Point<float> down, bool dragged)
+        {
+            return MouseEvent (src, pt, ModifierKeys (ModifierKeys::leftButtonModifier), 1.0f, 0, 0, 0, 0, disp, disp,
+                               Time::getCurrentTime(), down, Time::getCurrentTime(), 1, dragged);
+        };
+        int grabbed = -1;
+        for (int y = 30; y < disp->getHeight() - 30 && grabbed < 0; y += 8)
+        {
+            for (float x = 380; x < 560 && grabbed < 0; x += 4)
+            {
+                const Point<float> pt (x, (float) y);
+                disp->mouseMove (ev (pt, pt, false));
+                disp->mouseDown (ev (pt, pt, false));
+                for (int b = 0; b < arc::kNumBands; ++b) if (p->bandSettings (b).used) grabbed = b;
+                if (grabbed >= 0)
+                {
+                    disp->mouseDrag (ev (pt.translated (0, -60), pt, true));
+                    disp->mouseUp (ev (pt.translated (0, -60), pt, true));
+                }
+            }
+        }
+        check (grabbed >= 0, "spectrum grab created a band from the peak", grabbed >= 0, 1);
+        if (grabbed >= 0)
+        {
+            const auto gb = p->bandSettings (grabbed);
+            check (std::abs (12.0 * std::log2 (gb.freq / 440.0)) < 1.0, "grabbed band sits on the 440 Hz tone (" + theme::noteName (gb.freq) + ")", gb.freq, 440);
+            check (gb.gainDb > 2.0, "dragging up boosted it", gb.gainDb, 6);
+        }
         p->editorBeingDeleted (ed.get());
     }
 
