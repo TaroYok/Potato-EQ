@@ -2,6 +2,7 @@
 // state save/restore, and a rendered screenshot of the editor.
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Presets.h"
 #include <cstdio>
 
 using namespace juce;
@@ -131,6 +132,29 @@ int main (int argc, char** argv)
     check (placed >= 2 && placed <= 8, "auto curve turned into editable bands", placed, 6);
     check ((int) p->apvts.getRawParameterValue (params::id::autoMode)->load() == params::autoOff, "auto EQ switched off after commit", 0, 0);
 
+    std::puts ("-- factory presets --");
+    {
+        auto pp = std::make_unique<PotatoEQProcessor>();
+        pp->setPlayConfigDetails (2, 2, 48000, 512);
+        pp->prepareToPlay (48000, 512);
+        bool allOk = true;
+        for (int i = 0; i < pp->getNumPrograms(); ++i)
+        {
+            pp->setCurrentProgram (i);
+            int used = 0; for (int b = 0; b < arc::kNumBands; ++b) used += pp->bandSettings (b).used ? 1 : 0;
+            const double g = sineGainDb (*pp, 1000, 0);
+            if (used != (int) presets::all()[(size_t) i].bands.size() || ! std::isfinite (g)) allOk = false;
+        }
+        check (allOk, String (pp->getNumPrograms()) + " presets load the right bands and process cleanly", allOk, 1);
+        int radio = -1; for (int i = 0; i < pp->getNumPrograms(); ++i) if (pp->getProgramName (i).endsWith ("Radio")) radio = i;
+        pp->setCurrentProgram (radio);
+        const double lo = sineGainDb (*pp, 100, 0), mid = sineGainDb (*pp, 1600, 0);
+        check (lo < -15 && mid > 3, "Radio: lows cut hard, mids boosted (100 Hz dB)", lo, -20);
+        pp->setCurrentProgram (0);
+        int used = 0; for (int b = 0; b < arc::kNumBands; ++b) used += pp->bandSettings (b).used ? 1 : 0;
+        check (used == 0, "Default clears all bands", used, 0);
+    }
+
     std::puts ("-- note names --");
     check (theme::noteName (55.0) == "A1", "55 Hz is " + theme::noteName (55.0), 1, 1);
     check (theme::noteName (261.63) == "C4", "261.63 Hz is " + theme::noteName (261.63), 1, 1);
@@ -142,7 +166,7 @@ int main (int argc, char** argv)
         p->apvts.state.setProperty (ana::resolution, 3, nullptr);   // 16k FFT
         p->setParam (params::id::autoMode, (float) params::autoLearn);
         std::unique_ptr<AudioProcessorEditor> ed (p->createEditor());
-        ed->setSize (1240, 760);
+        ed->setSize (1360, 780);
         for (int i = 0; i < 30; ++i) { run (*p, 0.05, pinkish); pump (30); }
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
         File f (shotPath);

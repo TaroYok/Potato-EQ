@@ -25,7 +25,8 @@ private:
     juce::Slider scale, out;
     juce::Label scaleL, outL;
     juce::ToggleButton autoGain { "Auto gain" }, freeze { "Freeze" };
-    juce::TextButton anaMenu { "Analyzer..." };
+    juce::TextButton anaMenu { "Analyzer..." }, presetBtn { "Presets" };
+    void showPresetMenu();
     void showAnalyzerMenu();
     std::unique_ptr<APVTS::ComboBoxAttachment> aPhase, aAnalyzer, aRange;
     std::unique_ptr<APVTS::SliderAttachment> aScale, aOut;

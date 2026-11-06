@@ -48,10 +48,10 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     double getTailLengthSeconds() const override { return 0.2; }
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return {}; }
+    int getNumPrograms() override;
+    int getCurrentProgram() override { return currentPreset; }
+    void setCurrentProgram (int) override;
+    const juce::String getProgramName (int) override;
     void changeProgramName (int, const juce::String&) override {}
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
@@ -75,6 +75,7 @@ public:
     MatchResult matchLoudnessToTarget();
     void resetMeter() { meterResetRequest = true; }
 
+    void applyPreset (int index);         // loads a factory preset (message thread)
     int bandToFill() const;               // first unused band, -1 if none
     void setParam (const juce::String& id, float plainValue);
 
@@ -122,6 +123,7 @@ private:
     juce::int64 firHash = 0;
     std::atomic<bool> meterResetRequest { false };
     int lastMode = -1;
+    int currentPreset = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PotatoEQProcessor)
 };

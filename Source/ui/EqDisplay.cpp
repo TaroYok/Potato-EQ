@@ -372,6 +372,15 @@ void EqDisplay::paint (Graphics& g)
         g.drawText ("Double-click to add a band, or drag a peak in the analyzer.  Scroll = Q, right-click = options, Alt-click = delete.",
                     a.withTrimmedTop (a.getHeight() * 0.62f).withHeight (24), Justification::centred);
     }
+    if (message.isNotEmpty() && Time::getMillisecondCounter() < messageUntil)
+    {
+        g.setFont (theme::font (13.0f));
+        const float w = (float) GlyphArrangement::getStringWidthInt (theme::font (13.0f), message) + 28.0f;
+        auto box = Rectangle<float> (w, 26).withCentre ({ a.getCentreX(), a.getY() + 30 });
+        g.setColour (theme::panel.withAlpha (0.95f)); g.fillRoundedRectangle (box, 6);
+        g.setColour (theme::accent.withAlpha (0.7f)); g.drawRoundedRectangle (box, 6, 1);
+        g.setColour (theme::text); g.drawText (message, box, Justification::centred);
+    }
     String status;
     if (linear) status << "Linear phase  (latency " << String (1000.0 * proc.getLatencySamples() / jmax (1.0, fs), 0) << " ms, dynamic bands act static)    ";
     if (setting (ana::freeze, 0) != 0) status << "ANALYZER FROZEN";

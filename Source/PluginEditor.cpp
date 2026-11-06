@@ -1,4 +1,6 @@
 #include "PluginEditor.h"
+#include "Presets.h"
+#include <map>
 
 using namespace juce;
 
@@ -36,9 +38,12 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
     freeze.onClick = [this] { proc.apvts.state.setProperty (ana::freeze, freeze.getToggleState() ? 1 : 0, nullptr); };
     anaMenu.setTooltip ("Analyzer resolution, speed, tilt, range and peak hold.");
     anaMenu.onClick = [this] { showAnalyzerMenu(); };
+    presetBtn.setTooltip ("Factory presets: character EQs, instruments, vocals, mastering and filter sweeps.");
+    presetBtn.onClick = [this] { showPresetMenu(); };
+    if (proc.getCurrentProgram() > 0) presetBtn.setButtonText (presets::all()[(size_t) proc.getCurrentProgram()].name);
 
     for (auto* c : { (Component*) &phase, (Component*) &analyzer, (Component*) &range, (Component*) &autoGain,
-                     (Component*) &freeze, (Component*) &anaMenu,
+                     (Component*) &freeze, (Component*) &anaMenu, (Component*) &presetBtn,
                      (Component*) &display, (Component*) &bandPanel, (Component*) &loudness, (Component*) &autoPanel })
         addAndMakeVisible (*c);
 
@@ -51,8 +56,8 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
     };
 
     setResizable (true, true);
-    setResizeLimits (1100, 640, 2000, 1300);
-    setSize (1240, 760);
+    setResizeLimits (1240, 660, 2000, 1300);
+    setSize (1360, 780);
 }
 
 PotatoEQEditor::~PotatoEQEditor() { setLookAndFeel (nullptr); }
@@ -91,6 +96,31 @@ void PotatoEQEditor::showAnalyzerMenu()
     });
 }
 
+void PotatoEQEditor::showPresetMenu()
+{
+    PopupMenu m;
+    std::map<String, PopupMenu> cats;
+    StringArray order;
+    const auto& all = presets::all();
+    for (int i = 0; i < (int) all.size(); ++i)
+    {
+        const String c = all[(size_t) i].category;
+        if (! order.contains (c)) order.add (c);
+        cats[c].addItem (i + 1, all[(size_t) i].name, true, proc.getCurrentProgram() == i);
+    }
+    for (auto& c : order) m.addSubMenu (c, cats[c]);
+    SafePointer<PotatoEQEditor> safe (this);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&presetBtn), [safe] (int r)
+    {
+        if (safe == nullptr || r == 0) return;
+        const auto& p = presets::all()[(size_t) (r - 1)];
+        safe->proc.applyPreset (r - 1);
+        safe->presetBtn.setButtonText (p.name);
+        safe->display.setSelected (p.selectBand);
+        if (String (p.hint).isNotEmpty()) safe->display.showMessage (String (p.name) + ":  " + p.hint);
+    });
+}
+
 void PotatoEQEditor::paint (Graphics& g)
 {
     g.fillAll (theme::bg);
@@ -105,12 +135,13 @@ void PotatoEQEditor::resized()
 {
     auto r = getLocalBounds();
     auto top = r.removeFromTop (44).reduced (10, 9);
-    top.removeFromLeft (140);
-    phase.setBounds (top.removeFromLeft (130)); top.removeFromLeft (8);
-    analyzer.setBounds (top.removeFromLeft (110)); top.removeFromLeft (6);
+    top.removeFromLeft (128);
+    presetBtn.setBounds (top.removeFromLeft (150)); top.removeFromLeft (8);
+    phase.setBounds (top.removeFromLeft (118)); top.removeFromLeft (8);
+    analyzer.setBounds (top.removeFromLeft (100)); top.removeFromLeft (6);
     anaMenu.setBounds (top.removeFromLeft (86)); top.removeFromLeft (6);
     freeze.setBounds (top.removeFromLeft (72)); top.removeFromLeft (8);
-    range.setBounds (top.removeFromLeft (76)); top.removeFromLeft (10);
+    range.setBounds (top.removeFromLeft (70)); top.removeFromLeft (10);
     autoGain.setBounds (top.removeFromLeft (96));
     out.setBounds (top.removeFromRight (150)); outL.setBounds (top.removeFromRight (50));
     top.removeFromRight (6);

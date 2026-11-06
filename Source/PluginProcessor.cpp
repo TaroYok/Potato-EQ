@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Presets.h"
 #include <cstring>
 
 using namespace juce;
@@ -365,6 +366,55 @@ void PotatoEQProcessor::buildLinearPhase()
     }
     convLR.loadImpulseResponse (std::move (irLR), sr, dsp::Convolution::Stereo::yes, dsp::Convolution::Trim::no, dsp::Convolution::Normalise::no);
     convMS.loadImpulseResponse (std::move (irMS), sr, dsp::Convolution::Stereo::yes, dsp::Convolution::Trim::no, dsp::Convolution::Normalise::no);
+}
+
+int PotatoEQProcessor::getNumPrograms() { return (int) presets::all().size(); }
+
+const String PotatoEQProcessor::getProgramName (int i)
+{
+    if (! isPositiveAndBelow (i, getNumPrograms())) return {};
+    const auto& p = presets::all()[(size_t) i];
+    return String (p.category) + ": " + p.name;
+}
+
+void PotatoEQProcessor::setCurrentProgram (int i)
+{
+    // ignore re-selecting the current program: some hosts do that after restoring a project
+    if (i != currentPreset && isPositiveAndBelow (i, getNumPrograms())) applyPreset (i);
+}
+
+void PotatoEQProcessor::applyPreset (int index)
+{
+    if (! isPositiveAndBelow (index, getNumPrograms())) return;
+    const auto& p = presets::all()[(size_t) index];
+    for (int b = 0; b < arc::kNumBands; ++b)
+    {
+        if (b < (int) p.bands.size())
+        {
+            const auto& d = p.bands[(size_t) b];
+            setParam (params::bandId (b, "type"), (float) d.type);
+            setParam (params::bandId (b, "freq"), (float) d.freq);
+            setParam (params::bandId (b, "gain"), (float) d.gain);
+            setParam (params::bandId (b, "q"), (float) d.q);
+            setParam (params::bandId (b, "slope"), (float) params::slopeIndex (d.slope));
+            setParam (params::bandId (b, "place"), (float) d.place);
+            setParam (params::bandId (b, "dyn"), d.dynamic ? 1.0f : 0.0f);
+            setParam (params::bandId (b, "thr"), (float) d.thr);
+            setParam (params::bandId (b, "range"), (float) d.range);
+            setParam (params::bandId (b, "bypass"), 0.0f);
+            setParam (params::bandId (b, "used"), 1.0f);
+        }
+        else if (bandParams[(size_t) b].used->load() > 0.5f || bandParams[(size_t) b].dyn->load() > 0.5f)
+        {
+            setParam (params::bandId (b, "used"), 0.0f);
+            setParam (params::bandId (b, "gain"), 0.0f);
+            setParam (params::bandId (b, "dyn"), 0.0f);
+            setParam (params::bandId (b, "bypass"), 0.0f);
+        }
+    }
+    setParam (params::id::gainScale, 100.0f);
+    currentPreset = index;
+    updateHostDisplay (ChangeDetails().withProgramChanged (true));
 }
 
 int PotatoEQProcessor::bandToFill() const

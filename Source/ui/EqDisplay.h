@@ -23,6 +23,7 @@ public:
     int getSelected() const { return selected; }
     void setSelected (int b);
     void clearPeakHold();
+    void showMessage (const juce::String& m) { message = m; messageUntil = juce::Time::getMillisecondCounter() + 5000; repaint(); }
     std::function<void (int)> onSelectionChanged;
 
 private:
@@ -62,6 +63,8 @@ private:
     bool mouseInside = false;
     double dragStartFreq = 0, dragStartGain = 0;
     Peak hoverPeak;
+    juce::String message;
+    juce::uint32 messageUntil = 0;
 
     static constexpr int kMaxOrder = 14, kMaxSize = 1 << kMaxOrder;
     std::array<std::unique_ptr<juce::dsp::FFT>, kMaxOrder + 1> ffts;

@@ -27,6 +27,21 @@ Pushing a tag like `v0.1.0` also creates a GitHub Release with the zips attached
 - Drag nodes to move, scroll for Q, double-click to add or bypass, right-click for options, Alt-click to delete.
   Shift = fine adjust, Ctrl/Cmd = frequency only.
 
+**Analyzer**
+- Pre/post spectrum, resolution (2k–16k FFT), speed, tilt (0 / 3 / 4.5 / 6 dB/oct), 60–120 dB range
+- **Spectrum grab**: hover a peak in the analyzer, then drag it up or down to create a band right on it
+- Freeze and peak hold
+- Note names everywhere (hover readout, band readouts, "snap band to nearest note"), handy for tuning 808s and kicks
+
+**Factory presets** (Presets button, or your DAW's preset list)
+- Character: Radio, Telephone, Lo-fi / Old Vinyl, Muffled (next room), Megaphone
+- Drums: Kick Punch, Kick Sub Thump, Snare Crack, Hi-hats Smooth (dynamic), Drum Bus Glue
+- Bass: 808 Weight, Bass Tighten
+- Vocals: Clarity (with de-esser band), De-mud, De-ess, Backing Vocals Tuck
+- Instruments: Acoustic Guitar, Piano Bright, Synth Pad Make Room
+- Mix / Master: Polish, Air, Mono Bass (M/S), Wider Top (M/S)
+- Sweeps: Low-Pass, High-Pass, Band-Pass, Resonant Peak, Notch. Automate Band 1's frequency in your DAW
+
 **Loudness (ITU-R BS.1770-4 / EBU R128)**
 - Momentary, short-term, gated integrated LUFS, loudness range (LRA), 4×-oversampled true peak
 - Targets: Spotify/YouTube −14, Apple −16, club −9, loud −8, hip-hop/EDM −11, broadcast −23, podcast −16
