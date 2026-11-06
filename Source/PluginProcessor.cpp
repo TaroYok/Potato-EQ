@@ -7,7 +7,8 @@ using namespace juce;
 
 PotatoEQProcessor::PotatoEQProcessor()
     : AudioProcessor (BusesProperties().withInput ("Input", AudioChannelSet::stereo(), true)
-                                       .withOutput ("Output", AudioChannelSet::stereo(), true)),
+                                       .withOutput ("Output", AudioChannelSet::stereo(), true)
+                                       .withInput ("Sidechain", AudioChannelSet::stereo(), false)),
       Thread ("PotatoEQ worker"),
       apvts (*this, nullptr, "PotatoEQ", params::createLayout())
 {
@@ -20,6 +21,15 @@ PotatoEQProcessor::PotatoEQProcessor()
     pAutoMode = apvts.getRawParameterValue (params::id::autoMode);
     pAmount = apvts.getRawParameterValue (params::id::autoAmount);
     pTarget = apvts.getRawParameterValue (params::id::lufsTarget);
+    pAutoLevel = apvts.getRawParameterValue (params::id::autoLevel);
+    pLimiter = apvts.getRawParameterValue (params::id::limiter);
+    pCeiling = apvts.getRawParameterValue (params::id::ceiling);
+    pCustom = apvts.getRawParameterValue (params::id::lufsCustom);
+    pMaxBoost = apvts.getRawParameterValue (params::id::autoMaxBoost);
+    pMaxCut = apvts.getRawParameterValue (params::id::autoMaxCut);
+    pTilt = apvts.getRawParameterValue (params::id::autoTilt);
+    pBass = apvts.getRawParameterValue (params::id::autoBass);
+    pSmooth = apvts.getRawParameterValue (params::id::autoSmooth);
     meter.prepare (48000.0);
     startThread (Thread::Priority::low);
 }
@@ -29,7 +39,13 @@ PotatoEQProcessor::~PotatoEQProcessor() { stopThread (2000); }
 bool PotatoEQProcessor::isBusesLayoutSupported (const BusesLayout& l) const
 {
     const auto in = l.getMainInputChannelSet(), out = l.getMainOutputChannelSet();
-    return in == out && (out == AudioChannelSet::mono() || out == AudioChannelSet::stereo());
+    if (! (in == out && (out == AudioChannelSet::mono() || out == AudioChannelSet::stereo()))) return false;
+    if (l.inputBuses.size() > 1)
+    {
+        const auto sc = l.getChannelSet (true, 1);
+        if (! (sc.isDisabled() || sc == AudioChannelSet::mono() || sc == AudioChannelSet::stereo())) return false;
+    }
+    return true;
 }
 
 void PotatoEQProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -37,6 +53,8 @@ void PotatoEQProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     fs = sampleRate;
     engine.prepare (sampleRate);
     meter.prepare (sampleRate);
+    preMeter.prepare (sampleRate);
+    limiter.prepare (sampleRate);
     outSmooth.reset (sampleRate, 0.05);
     outSmooth.setCurrentAndTargetValue (Decibels::decibelsToGain (pOut->load()));
     monoScratch.assign ((size_t) samplesPerBlock + 16, 0.0f);
@@ -64,7 +82,9 @@ void PotatoEQProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     dsp::ProcessSpec spec { sampleRate, (uint32) samplesPerBlock, 2 };
     convLR.prepare (spec); convMS.prepare (spec);
     firDirty = true;
-    lastMode = -1;
+    lastMode = (int) pPhase->load();
+    linearActive = lastMode == 1;
+    updateLatency();
 }
 
 std::array<arc::BandSettings, arc::kNumBands> PotatoEQProcessor::readAllBands() const
@@ -74,14 +94,50 @@ std::array<arc::BandSettings, arc::kNumBands> PotatoEQProcessor::readAllBands() 
     return b;
 }
 
-void PotatoEQProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
+void PotatoEQProcessor::updateLatency()
+{
+    setLatencySamples ((lastMode == 1 ? firSize : 0) + limiter.latency());
+}
+
+float PotatoEQProcessor::targetLufs() const
+{
+    const auto& t = params::lufsTargets()[(size_t) jlimit (0, (int) params::lufsTargets().size() - 1, (int) pTarget->load())];
+    return t.lufs > 0 ? pCustom->load() : t.lufs;
+}
+
+arc::AutoTweaks PotatoEQProcessor::readTweaks() const
+{
+    arc::AutoTweaks t;
+    t.maxBoost = pMaxBoost->load(); t.maxCut = pMaxCut->load();
+    t.tiltDbPerOct = pTilt->load(); t.bassDb = pBass->load(); t.smoothing = (int) pSmooth->load();
+    return t;
+}
+
+void PotatoEQProcessor::processBlock (AudioBuffer<float>& fullBuffer, MidiBuffer&)
 {
     ScopedNoDenormals noDenormals;
+    auto buffer = getBusBuffer (fullBuffer, true, 0);
     const int n = buffer.getNumSamples();
-    const int numCh = jmin (2, getTotalNumInputChannels());
-    for (int c = numCh; c < getTotalNumOutputChannels(); ++c) buffer.clear (c, 0, n);
+    const int numCh = jmin (2, buffer.getNumChannels());
     if (n == 0 || numCh == 0) return;
+
     if ((int) monoScratch.size() < n) monoScratch.resize ((size_t) n);   // only if the host lied about block size
+
+    // optional sidechain input
+    const float* scPtr[2] = { nullptr, nullptr };
+    int scCh = 0;
+    if (getBusCount (true) > 1 && getBus (true, 1)->isEnabled())
+    {
+        auto sc = getBusBuffer (fullBuffer, true, 1);
+        scCh = jmin (2, sc.getNumChannels());
+        for (int c = 0; c < scCh; ++c) scPtr[c] = sc.getReadPointer (c);
+    }
+    scActive = scCh > 0;
+    if (scCh > 0)
+    {
+        for (int i = 0; i < n; ++i) monoScratch[(size_t) i] = scCh > 1 ? 0.5f * (scPtr[0][i] + scPtr[1][i]) : scPtr[0][i];
+        scFifo.push (monoScratch.data(), n);
+    }
 
     auto pushMono = [&] (SampleFifo& f)
     {
@@ -105,7 +161,7 @@ void PotatoEQProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
     {
         lastMode = mode;
         linearActive = mode == 1;
-        setLatencySamples (mode == 1 ? firSize : 0);
+        updateLatency();
         if (mode == 1) { firDirty = true; convLR.reset(); convMS.reset(); }
         else engine.reset();
     }
@@ -115,7 +171,7 @@ void PotatoEQProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
         engine.setBands (readAllBands());
         engine.setGainScale (pScale->load() / 100.0);
         engine.setAuto (engineCurve, pAmount->load() / 100.0, autoMode != params::autoOff);
-        engine.process (buffer.getArrayOfWritePointers(), numCh, n);
+        engine.process (buffer.getArrayOfWritePointers(), numCh, n, scCh > 0 ? scPtr : nullptr, scCh);
     }
     else
     {
@@ -131,7 +187,30 @@ void PotatoEQProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
         else convMS.process (dsp::ProcessContextReplacing<float> (block));   // keeps latency identical in mono
     }
 
-    float targetDb = pOut->load() + (pAutoGain->load() > 0.5f ? autoGainNow.load() : 0.0f);
+    if (meterResetRequest.load()) preMeter.reset();
+    preMeter.process (buffer.getArrayOfReadPointers(), numCh, n);
+    // auto level: ride the gain toward the loudness target (sample-time based, so offline renders behave too)
+    {
+        const double sr = fs.load();
+        float lvl = autoLevelNow.load();
+        if (pAutoLevel->load() > 0.5f)
+        {
+            const auto pr = preMeter.get();
+            const float in = pr.integratedValid ? pr.integrated : pr.shortTerm;
+            if (in > -60.0f)
+            {
+                const float target = targetLufs();
+                const auto outR = meter.get();
+                if (outR.shortTerm > -60.0f)   // small correction for what the limiter takes away
+                    levelTrim = jlimit (-6.0f, 6.0f, levelTrim + (float) (n / (sr * 4.0)) * (target - outR.shortTerm));
+                const float want = jlimit (-24.0f, 24.0f, target - in - pOut->load() + levelTrim);
+                lvl += (want - lvl) * (float) (1.0 - std::exp (-n / (sr * 0.8)));
+            }
+        }
+        else { lvl *= (float) std::exp (-n / (sr * 0.3)); levelTrim = 0; }
+        autoLevelNow = lvl;
+    }
+    float targetDb = pOut->load() + (pAutoGain->load() > 0.5f ? autoGainNow.load() : 0.0f) + autoLevelNow.load();
     outSmooth.setTargetValue (Decibels::decibelsToGain (targetDb));
     if (outSmooth.isSmoothing())
     {
@@ -145,6 +224,11 @@ void PotatoEQProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
     {
         for (int c = 0; c < numCh; ++c) buffer.applyGain (c, 0, n, outSmooth.getCurrentValue());
     }
+
+    // limiter always runs (as a pure delay when off) so the latency never changes
+    limiter.process (buffer.getArrayOfWritePointers(), numCh, n, pLimiter->load() > 0.5f ? (double) pCeiling->load() : 60.0);
+    limiterGr = limiter.gainReductionDb();
+    limiter.clearMeter();
 
     if (meterResetRequest.exchange (false)) meter.reset();
     meter.process (buffer.getArrayOfReadPointers(), numCh, n);
@@ -259,7 +343,10 @@ void PotatoEQProcessor::run()
         }
 
         // ---- auto-EQ fitting
-        bool compute = false;
+        const auto tw = readTweaks();
+        const double twHash = tw.maxBoost * 1.1 + tw.maxCut * 3.7 + tw.tiltDbPerOct * 13.3 + tw.bassDb * 29.1 + tw.smoothing * 101.0;
+        bool compute = twHash != lastTweakHash && learnDone.load() && autoMode == params::autoLearn;
+        lastTweakHash = twHash;
         if (autoMode == params::autoLearn && learnDone.load() && (profile != lastProfile || ! autoSnapshot().result.valid)) compute = true;
         if (autoMode == params::autoLive && Time::currentTimeMillis() - lastLive > 500) { compute = true; lastLive = Time::currentTimeMillis(); }
         if (autoMode != params::autoOff && autoMode == params::autoLearn && profile != lastProfile && learnDone.load()) compute = true;
@@ -271,7 +358,7 @@ void PotatoEQProcessor::run()
             { const SpinLock::ScopedLockType lock (learnLock); acc = learnAccum; frames = learnFrames; }
             if (frames >= 3)
             {
-                auto r = arc::computeAutoEq (acc, arc::profiles()[(size_t) profile], fs.load());
+                auto r = arc::computeAutoEq (acc, arc::profiles()[(size_t) profile], fs.load(), tw);
                 if (r.valid)
                 {
                     const SpinLock::ScopedLockType lock (resultLock);
@@ -472,11 +559,10 @@ PotatoEQProcessor::MatchResult PotatoEQProcessor::matchLoudnessToTarget()
     const auto r = meter.get();
     const float current = r.integratedValid ? r.integrated : r.shortTerm;
     if (current < -69.0f) return m;
-    const float target = params::lufsTargets()[(size_t) jlimit (0, (int) params::lufsTargets().size() - 1, (int) pTarget->load())].lufs;
-    m.wantedDb = target - current;
+    m.wantedDb = targetLufs() - current;
     m.appliedDb = m.wantedDb;
-    const float room = -1.0f - r.truePeakDb;   // keep true peak at or below -1 dBTP
-    if (m.appliedDb > room) { m.appliedDb = jmax (0.0f, room); m.limitedByPeak = true; }
+    const float room = -1.0f - r.truePeakDb;   // without the limiter, keep true peak at or below -1 dBTP
+    if (pLimiter->load() < 0.5f && m.appliedDb > room) { m.appliedDb = jmax (0.0f, room); m.limitedByPeak = true; }
     setParam (params::id::outGain, jlimit (-24.0f, 24.0f, pOut->load() + m.appliedDb));
     resetMeter();
     m.ok = true;

@@ -18,6 +18,7 @@ inline const Colour warn      { 0xffffc857 };
 inline const Colour bad       { 0xffff5a5f };
 inline const Colour preSpec   { 0xff3a6ea5 };
 inline const Colour postSpec  { 0xff7fb3e6 };
+inline const Colour scSpec    { 0xffc77dff };
 
 inline Colour bandColour (int band)
 {
@@ -53,7 +54,8 @@ inline juce::String noteName (double f)
 namespace ana
 {
     inline const juce::Identifier freeze ("anaFreeze"), peakHold ("anaPeakHold"), resolution ("anaRes"),
-                                  speed ("anaSpeed"), tilt ("anaTilt"), range ("anaRange");
+                                  speed ("anaSpeed"), tilt ("anaTilt"), range ("anaRange"),
+                                  showSc ("anaShowSc"), collide ("anaCollide");
     inline const juce::StringArray resolutionNames { "Low", "Medium", "High", "Maximum" };   // FFT 2k/4k/8k/16k
     inline const juce::StringArray speedNames { "Slow", "Medium", "Fast" };
     inline const juce::StringArray tiltNames { "0 dB/oct", "3 dB/oct", "4.5 dB/oct", "6 dB/oct" };

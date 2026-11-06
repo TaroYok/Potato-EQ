@@ -82,7 +82,7 @@ static void solveAutoBells (const std::array<double, kSpecBins>& desired, AutoCu
     }
 }
 
-AutoResult computeAutoEq (const std::array<double, kSpecBins>& power, const Profile& p, double fs)
+AutoResult computeAutoEq (const std::array<double, kSpecBins>& power, const Profile& p, double fs, const AutoTweaks& tw)
 {
     AutoResult r;
     double peak = 0;
@@ -93,7 +93,9 @@ AutoResult computeAutoEq (const std::array<double, kSpecBins>& power, const Prof
     for (int i = 0; i < kSpecBins; ++i)
     {
         r.measuredDb[(size_t) i] = 10.0 * std::log10 (std::max (power[(size_t) i], peak * 1e-12));
-        r.targetDb[(size_t) i] = targetAt (p, specBinFreq (i));
+        const double f = specBinFreq (i);
+        r.targetDb[(size_t) i] = targetAt (p, f) + tw.tiltDbPerOct * std::log2 (f / 1000.0)
+                               + tw.bassDb / (1.0 + std::pow (f / 120.0, 4.0));
         has[(size_t) i] = power[(size_t) i] > peak * 1e-6 && specBinFreq (i) < fs * 0.45;   // within 60 dB of the loudest band
     }
 
@@ -115,15 +117,16 @@ AutoResult computeAutoEq (const std::array<double, kSpecBins>& power, const Prof
     for (int i = 0; i < kSpecBins; ++i)
     {
         double s = 0, ws = 0;
-        for (int d = -3; d <= 3; ++d)
+        const int half = tw.smoothing <= 0 ? 6 : tw.smoothing == 1 ? 3 : 1;
+        for (int d = -half; d <= half; ++d)
         {
             const int j = i + d;
             if (j < 0 || j >= kSpecBins || ! has[(size_t) j]) continue;
-            const double w = 4.0 - std::abs (d);
+            const double w = half + 1.0 - std::abs (d);
             s += w * raw[(size_t) j]; ws += w;
         }
         double c = ws > 0 ? s / ws : 0.0;
-        c = std::clamp (c, -p.maxCut, p.maxBoost);
+        c = std::clamp (c, -tw.maxCut, tw.maxBoost);
         // never boost a region that has (almost) nothing in it, e.g. sub on a vocal
         if (c > 0 && (! has[(size_t) i] || r.measuredDb[(size_t) i] < r.targetDb[(size_t) i] - 20.0)) c = 0.0;
         c *= rangeWeight (specBinFreq (i), p.fitLo, p.fitHi);

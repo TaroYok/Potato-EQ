@@ -56,8 +56,8 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
     };
 
     setResizable (true, true);
-    setResizeLimits (1240, 660, 2000, 1300);
-    setSize (1360, 780);
+    setResizeLimits (1240, 800, 2000, 1300);
+    setSize (1360, 860);
 }
 
 PotatoEQEditor::~PotatoEQEditor() { setLookAndFeel (nullptr); }
@@ -82,6 +82,9 @@ void PotatoEQEditor::showAnalyzerMenu()
     m.addSeparator();
     m.addItem (1, "Peak hold", true, ana::get (st, ana::peakHold, 0) != 0);
     m.addItem (2, "Clear peak hold");
+    m.addSeparator();
+    m.addItem (3, "Show sidechain spectrum", true, ana::get (st, ana::showSc, 1) != 0);
+    m.addItem (5, "Highlight collisions with sidechain", true, ana::get (st, ana::collide, 1) != 0);
     SafePointer<PotatoEQEditor> safe (this);
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (&anaMenu), [safe] (int r)
     {
@@ -89,6 +92,8 @@ void PotatoEQEditor::showAnalyzerMenu()
         auto& s = safe->proc.apvts.state;
         if (r == 1) { s.setProperty (ana::peakHold, ana::get (s, ana::peakHold, 0) ? 0 : 1, nullptr); safe->display.clearPeakHold(); }
         else if (r == 2) safe->display.clearPeakHold();
+        else if (r == 3) s.setProperty (ana::showSc, ana::get (s, ana::showSc, 1) ? 0 : 1, nullptr);
+        else if (r == 5) s.setProperty (ana::collide, ana::get (s, ana::collide, 1) ? 0 : 1, nullptr);
         else if (r >= 400) s.setProperty (ana::range, r - 400, nullptr);
         else if (r >= 300) s.setProperty (ana::tilt, r - 300, nullptr);
         else if (r >= 200) s.setProperty (ana::speed, r - 200, nullptr);
@@ -150,7 +155,7 @@ void PotatoEQEditor::resized()
     r.reduce (10, 0); r.removeFromBottom (10);
     auto side = r.removeFromRight (290);
     r.removeFromRight (10);
-    loudness.setBounds (side.removeFromTop (370));
+    loudness.setBounds (side.removeFromTop (440));
     side.removeFromTop (10);
     autoPanel.setBounds (side);
     bandPanel.setBounds (r.removeFromBottom (122));

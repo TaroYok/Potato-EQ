@@ -23,7 +23,8 @@ Pushing a tag like `v0.1.0` also creates a GitHub Release with the zips attached
 - **Dynamic EQ** per band (bell and shelves): threshold + range, ~2:1 action
 - **Zero Latency** (smooth, modulation-safe SVF filters) or **Linear Phase** (FIR, ~170 ms latency at 48 kHz)
 - Gain scale (shrink/exaggerate every band at once), output gain, auto-gain
-- Pre/post spectrum analyzer with a 4.5 dB/oct tilt
+- **Sidechain**: any dynamic band can listen to the plugin's sidechain input instead of its own track
+  (duck the bass at 60 Hz when the kick hits, carve 2–4 kHz out of the beat only while the vocal sings)
 - Drag nodes to move, scroll for Q, double-click to add or bypass, right-click for options, Alt-click to delete.
   Shift = fine adjust, Ctrl/Cmd = frequency only.
 
@@ -31,6 +32,7 @@ Pushing a tag like `v0.1.0` also creates a GitHub Release with the zips attached
 - Pre/post spectrum, resolution (2k–16k FFT), speed, tilt (0 / 3 / 4.5 / 6 dB/oct), 60–120 dB range
 - **Spectrum grab**: hover a peak in the analyzer, then drag it up or down to create a band right on it
 - Freeze and peak hold
+- Sidechain spectrum overlay with **collision highlighting**: red shows where this track and the sidechained track are both strong
 - Note names everywhere (hover readout, band readouts, "snap band to nearest note"), handy for tuning 808s and kicks
 
 **Factory presets** (Presets button, or your DAW's preset list)
@@ -45,8 +47,10 @@ Pushing a tag like `v0.1.0` also creates a GitHub Release with the zips attached
 **Loudness (ITU-R BS.1770-4 / EBU R128)**
 - Momentary, short-term, gated integrated LUFS, loudness range (LRA), 4×-oversampled true peak
 - Targets: Spotify/YouTube −14, Apple −16, club −9, loud −8, hip-hop/EDM −11, broadcast −23, podcast −16
-- **Match target** sets the output gain to hit the target while keeping true peak ≤ −1 dBTP.
-  Anything louder needs a limiter after the EQ.
+- Custom target (−30 to −5 LUFS)
+- **Auto level to target** rides the gain so the track lands on the target (works in offline renders too)
+- **Limiter**: brickwall look-ahead limiter (1.5 ms) with adjustable ceiling, so loud targets don't clip
+- **Match target** is the one-shot version. Without the limiter it never pushes the true peak above −1 dBTP
 
 **Auto EQ**
 - Profiles for full mixes (Balanced, Hip-Hop/Trap, EDM, Dubstep/DnB, Pop, R&B, Rock, Lo-fi, Acoustic/Jazz)
@@ -57,10 +61,26 @@ Pushing a tag like `v0.1.0` also creates a GitHub Release with the zips attached
   limits it (mixes: +4 / −6 dB, sources: up to +6 / −9 dB), never boosts empty regions,
   and adds the profile's high-pass for sources
 - **Amount** 0–150 %, and **Turn into bands** converts the result into ordinary editable bands
+- Tweaks: **Brightness** (tilts the target ±3 dB/oct), **Low end** (±6 dB below ~120 Hz),
+  **Max boost / Max cut**, and **Detail** (Broad = overall balance only, Fine = narrower corrections)
 
 The target curves are smooth tonal-balance references, based on the typical long-term
 spectra of commercial releases. They are starting points to steer toward, not rules;
 trust your ears and your reference tracks.
+
+## Performance
+
+Measured by the test harness on a 2.1 GHz server CPU (one core):
+
+| Scenario | CPU |
+|---|---|
+| Zero latency, all 24 bands (96 dB/oct cuts, 8 dynamic, M/S), live auto EQ, auto level, limiter | ~4 % |
+| Same, with 24 parameters automated every block | ~4.5 % |
+| Linear phase, everything on | ~2.5 % |
+
+Parameter changes are smoothed every 32 samples (frequency in log space), and the state-variable
+filters stay stable under fast modulation, so automation sweeps are click-free. In linear-phase mode the FIR
+is rebuilt in the background and cross-faded, so fast automation is smoother in zero-latency mode.
 
 ## Building yourself
 

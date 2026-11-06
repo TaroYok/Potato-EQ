@@ -8,7 +8,7 @@ static constexpr int kColStep = 2;
 
 EqDisplay::EqDisplay (PotatoEQProcessor& p) : proc (p)
 {
-    for (auto* s : { &pre, &post }) s->ring.assign (kMaxSize, 0.0f);
+    for (auto* s : { &pre, &post, &side }) s->ring.assign (kMaxSize, 0.0f);
     fftData.assign (2 * kMaxSize, 0.0f);
     setOpaque (true);
     startTimerHz (30);
@@ -36,7 +36,7 @@ float EqDisplay::yForSpectrum (double db) const
 void EqDisplay::resized()
 {
     const int cols = jmax (1, (int) plotArea().getWidth() / kColStep + 1);
-    for (auto* s : { &pre, &post }) { s->display.assign ((size_t) cols, -150.0f); s->peak.assign ((size_t) cols, -150.0f); }
+    for (auto* s : { &pre, &post, &side }) { s->display.assign ((size_t) cols, -150.0f); s->peak.assign ((size_t) cols, -150.0f); }
 }
 
 void EqDisplay::clearPeakHold()
@@ -102,6 +102,7 @@ void EqDisplay::timerCallback()
     if (wantOrder != fftOrder) fftOrder = wantOrder;
     pullSpectrum (proc.preFifo, pre, ! frozen && (mode == 1 || mode == 3));
     pullSpectrum (proc.postFifo, post, ! frozen && (mode == 2 || mode == 3));
+    pullSpectrum (proc.scFifo, side, ! frozen && mode != 0 && proc.sidechainActive() && setting (ana::showSc, 1) != 0);
     for (int b = 0; b < arc::kNumBands; ++b) bands[(size_t) b] = proc.bandSettings (b);
     if (mouseInside && dragging < 0 && hovered < 0) findPeakNear (mousePos);
     repaint();
@@ -175,6 +176,26 @@ Point<float> EqDisplay::nodePosition (const arc::BandSettings& b) const
     return { xForFreq (b.freq), jlimit (plotArea().getY() + 4, plotArea().getBottom() - 4, yForGain (y)) };
 }
 
+static bool sameBand (const arc::BandSettings& a, const arc::BandSettings& b)
+{
+    return a.type == b.type && a.freq == b.freq && a.q == b.q && a.slope == b.slope;
+}
+
+const std::vector<float>& EqDisplay::bandCurve (int band, const arc::BandSettings& s, double eff, int cols)
+{
+    auto& c = curveCache[(size_t) band];
+    const double fs = proc.getFs();
+    const auto a = plotArea();
+    if ((int) c.db.size() != cols || c.fs != fs || c.width != a.getWidth() || ! sameBand (c.key, s) || std::abs (c.eff - eff) > 1e-4)
+    {
+        c.db.resize ((size_t) cols);
+        const auto set = arc::designBand (s, eff, fs);
+        for (int i = 0; i < cols; ++i) c.db[(size_t) i] = (float) set.magnitudeDb (freqForX (a.getX() + (float) i * 3), fs);
+        c.key = s; c.eff = eff; c.fs = fs; c.width = a.getWidth();
+    }
+    return c.db;
+}
+
 void EqDisplay::paint (Graphics& g)
 {
     g.fillAll (theme::bg);
@@ -239,6 +260,30 @@ void EqDisplay::paint (Graphics& g)
     };
     if (mode == 1 || mode == 3) drawSpec (pre, theme::preSpec, true);
     if (mode == 2 || mode == 3) drawSpec (post, theme::postSpec, mode == 2);
+    if (mode != 0 && proc.sidechainActive() && setting (ana::showSc, 1) != 0 && ! side.display.empty())
+    {
+        g.setColour (theme::scSpec.withAlpha (0.85f));
+        g.strokePath (specPath (side.display, false), PathStrokeType (1.2f));
+        // collisions: frequencies where this track and the sidechain track are both strong
+        const auto* own = grabSource();
+        if (own != nullptr && setting (ana::collide, 1) != 0 && own->display.size() == side.display.size())
+        {
+            const float topA = *std::max_element (own->display.begin(), own->display.end());
+            const float topB = *std::max_element (side.display.begin(), side.display.end());
+            for (size_t c = 0; c < side.display.size(); ++c)
+            {
+                const float ea = own->display[c] - (topA - 24.0f), eb = side.display[c] - (topB - 24.0f);
+                if (ea <= 0 || eb <= 0) continue;
+                const float k = jlimit (0.0f, 1.0f, jmin (ea, eb) / 12.0f);
+                const float x = a.getX() + (float) c * kColStep;
+                const float y = yForSpectrum (jmin (own->display[c], side.display[c]));
+                g.setColour (theme::bad.withAlpha (0.12f + 0.3f * k));
+                g.fillRect (Rectangle<float> (x, y, (float) kColStep, a.getBottom() - y));
+            }
+        }
+        g.setColour (theme::scSpec); g.setFont (theme::font (11.0f));
+        g.drawText ("sidechain", a.reduced (8, 4).removeFromTop (14), Justification::topRight);
+    }
 
     // curves
     const int cols = (int) (a.getWidth() / 3) + 2;
@@ -253,31 +298,41 @@ void EqDisplay::paint (Graphics& g)
         const auto& s = bands[(size_t) b];
         if (! s.active()) continue;
         const double dyn = linear ? 0.0 : proc.dynamicDelta (b);
-        const auto set = arc::designBand (s, s.gainDb * scale + dyn, fs);
+        const auto& curve = bandCurve (b, s, s.gainDb * scale + dyn, cols);
         Path p;
         const float zero = yForGain (0);
         p.startNewSubPath (a.getX(), zero);
         for (int i = 0; i < cols; ++i)
         {
             const float x = a.getX() + (float) i * 3;
-            const double db = set.magnitudeDb (freqForX (x), fs);
+            const double db = curve[(size_t) i];
             total[(size_t) i] += db;
             p.lineTo (x, jlimit (a.getY() - 2, a.getBottom() + 2, yForGain (db)));
         }
         p.lineTo (a.getRight(), zero);
         const auto c = theme::bandColour (b);
-        g.setColour (c.withAlpha (b == selected ? 0.22f : 0.10f));
-        g.fillPath (p);
+        if (b == selected || b == hovered || b == dragging)   // filling every band is costly on software renderers
+        {
+            g.setColour (c.withAlpha (0.22f));
+            g.fillPath (p);
+        }
         g.setColour (c.withAlpha (b == selected ? 0.9f : 0.35f));
         g.strokePath (p, PathStrokeType (1.0f));
     }
     if (autoOn)
     {
+        std::array<double, arc::kAutoBells> key {};
+        for (int k = 0; k < arc::kAutoBells; ++k) key[(size_t) k] = snap.result.curve.gainsDb[(size_t) k] * amount + snap.result.curve.hpfHz * 1e-3;
+        if (key != autoKey || (int) autoCache.db.size() != cols || autoCache.width != a.getWidth() || autoCache.fs != fs)
+        {
+            autoKey = key; autoCache.db.resize ((size_t) cols); autoCache.width = a.getWidth(); autoCache.fs = fs;
+            for (int i = 0; i < cols; ++i) autoCache.db[(size_t) i] = (float) arc::autoCurveDb (snap.result.curve, amount, freqForX (a.getX() + (float) i * 3), fs);
+        }
         Path p;
         for (int i = 0; i < cols; ++i)
         {
             const float x = a.getX() + (float) i * 3;
-            const double db = arc::autoCurveDb (snap.result.curve, amount, freqForX (x), fs);
+            const double db = autoCache.db[(size_t) i];
             total[(size_t) i] += db;
             const float y = jlimit (a.getY() - 2, a.getBottom() + 2, yForGain (db));
             if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);

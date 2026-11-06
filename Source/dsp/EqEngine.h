@@ -80,14 +80,21 @@ public:
     float dynamicDelta (int band) const { return bands[(size_t) band].delta.load (std::memory_order_relaxed); }
     float autoGainNow (int i) const { return (float) autoCur[(size_t) i]; }
 
-    void process (float* const* io, int numCh, int numSamples)
+    // sc / scCh: optional external sidechain (used by dynamic bands with sidechain enabled)
+    void process (float* const* io, int numCh, int numSamples, const float* const* sc = nullptr, int scCh = 0)
     {
         numCh = std::min (numCh, 2);
         for (int off = 0; off < numSamples; off += kSub)
         {
             const int n = std::min (kSub, numSamples - off);
-            double L[kSub], R[kSub];
+            double L[kSub], R[kSub], SC[kSub];
             for (int i = 0; i < n; ++i) { L[i] = io[0][off + i]; R[i] = numCh > 1 ? io[1][off + i] : L[i]; }
+            scNow = nullptr;
+            if (sc != nullptr && scCh > 0)
+            {
+                for (int i = 0; i < n; ++i) SC[i] = scCh > 1 ? 0.5 * ((double) sc[0][off + i] + sc[1][off + i]) : sc[0][off + i];
+                scNow = SC;
+            }
 
             bool anyMS = false;
             for (auto& b : bands)
@@ -164,11 +171,16 @@ private:
         {
             b.det = detectorSection (b.cur, fs);
             double env = b.env;
+            const bool useSc = t.sidechain && scNow != nullptr;
             for (int i = 0; i < n; ++i)
             {
                 double x = 0.0;
-                if (a) x = std::max (x, std::abs (b.detSt[0].process (b.det, a[i])));
-                if (c) x = std::max (x, std::abs (b.detSt[1].process (b.det, c[i])));
+                if (useSc) x = std::abs (b.detSt[0].process (b.det, scNow[i]));
+                else
+                {
+                    if (a) x = std::max (x, std::abs (b.detSt[0].process (b.det, a[i])));
+                    if (c) x = std::max (x, std::abs (b.detSt[1].process (b.det, c[i])));
+                }
                 env = x > env ? envAtt * env + (1 - envAtt) * x : envRel * env + (1 - envRel) * x;
             }
             b.env = env;
@@ -212,6 +224,7 @@ private:
 
     double fs = 48000.0, smooth = 0.1, autoSmooth = 0.01, envAtt = 0.99, envRel = 0.999;
     double gainScale = 1.0;
+    const double* scNow = nullptr;
     std::array<Band, kNumBands> bands;
 
     AutoCurve autoTarget;

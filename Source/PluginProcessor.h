@@ -3,6 +3,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include "Params.h"
 #include "dsp/Loudness.h"
+#include "dsp/Limiter.h"
 
 // Lock-free mono sample FIFO from the audio thread to the analyzer display.
 class SampleFifo
@@ -58,8 +59,12 @@ public:
 
     // ---- used by the editor (message thread) ----
     juce::AudioProcessorValueTreeState apvts;
-    SampleFifo preFifo, postFifo;
-    arc::LoudnessMeter meter;
+    SampleFifo preFifo, postFifo, scFifo;
+    arc::LoudnessMeter meter, preMeter;   // output, and after-EQ/before-gain (used by auto level)
+    float autoLevelDb() const { return autoLevelNow.load(); }
+    float limiterReductionDb() const { return limiterGr.load(); }
+    bool sidechainActive() const { return scActive.load(); }
+    float targetLufs() const;
     double getFs() const { return fs.load(); }
 
     arc::BandSettings bandSettings (int b) const { return bandParams[(size_t) b].read(); }
@@ -113,7 +118,13 @@ private:
     arc::AutoResult autoResult;
     bool autoResultFresh = false;
     arc::AutoCurve engineCurve;
-    std::atomic<float> autoGainNow { 0 };
+    std::atomic<float> autoGainNow { 0 }, autoLevelNow { 0 }, limiterGr { 0 };
+    std::atomic<bool> scActive { false };
+    arc::Limiter limiter;
+    std::atomic<float>* pAutoLevel {}; std::atomic<float>* pLimiter {}; std::atomic<float>* pCeiling {}; std::atomic<float>* pCustom {};
+    std::atomic<float>* pMaxBoost {}; std::atomic<float>* pMaxCut {}; std::atomic<float>* pTilt {}; std::atomic<float>* pBass {}; std::atomic<float>* pSmooth {};
+    arc::AutoTweaks readTweaks() const;
+    void updateLatency();
     int lastProfile = -1;
 
     // linear phase
@@ -124,6 +135,8 @@ private:
     std::atomic<bool> meterResetRequest { false };
     int lastMode = -1;
     int currentPreset = 0;
+    float levelTrim = 0;
+    double lastTweakHash = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PotatoEQProcessor)
 };

@@ -78,6 +78,20 @@ int main()
         near ("dynamic bell pulls loud 1 kHz down by range", runSineRmsDb (eq3, 1000, fs, 0.5), -6, 0.3);
         EqEngine eq4; eq4.prepare (fs); eq4.setBands (dy);
         near ("dynamic bell leaves quiet signal alone", runSineRmsDb (eq4, 1000, fs, 0.001), 0, 0.3);
+        // sidechain: band listens to a separate loud signal -> ducks the (quiet) main signal anyway
+        dy[0].sidechain = true;
+        EqEngine eq5; eq5.prepare (fs); eq5.setBands (dy);
+        {
+            const int n = (int) fs; std::vector<float> L ((size_t) n), R ((size_t) n), S ((size_t) n);
+            for (int i = 0; i < n; ++i) { L[(size_t) i] = R[(size_t) i] = (float) (0.001 * std::sin (2 * kPi * 1000 * i / fs)); S[(size_t) i] = (float) (0.5 * std::sin (2 * kPi * 1000 * i / fs)); }
+            for (int off = 0; off < n; off += 512)
+            {
+                float* io[2] = { L.data() + off, R.data() + off }; const float* sc[1] = { S.data() + off };
+                eq5.process (io, 2, std::min (512, n - off), sc, 1);
+            }
+            double e = 0; for (int i = n / 2; i < n; ++i) e += (double) L[(size_t) i] * L[(size_t) i];
+            near ("sidechain: loud key signal ducks the quiet main signal", 10 * std::log10 (e / (n / 2)) - 20 * std::log10 (0.001 / std::sqrt (2.0)), -6, 0.3);
+        }
     }
 
     std::puts ("-- loudness (EBU test signals) --");

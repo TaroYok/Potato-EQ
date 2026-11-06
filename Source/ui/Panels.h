@@ -47,11 +47,11 @@ private:
     juce::ComboBox type, slope, place;
     juce::Label typeL, slopeL, placeL;
     Knob freq { "FREQUENCY" }, gain { "GAIN" }, q { "Q" }, thr { "THRESHOLD" }, range { "RANGE" };
-    juce::ToggleButton dyn { "Dynamic" }, bypass { "Bypass" };
+    juce::ToggleButton dyn { "Dynamic" }, bypass { "Bypass" }, sc { "Sidechain" };
     juce::TextButton del { "Delete band" };
     std::unique_ptr<APVTS::ComboBoxAttachment> aType, aSlope, aPlace;
     std::unique_ptr<APVTS::SliderAttachment> aFreq, aGain, aQ, aThr, aRange;
-    std::unique_ptr<APVTS::ButtonAttachment> aDyn, aBypass;
+    std::unique_ptr<APVTS::ButtonAttachment> aDyn, aBypass, aSc;
 };
 
 class LoudnessPanel : public juce::Component, private juce::Timer
@@ -68,6 +68,12 @@ private:
     juce::ComboBox target;
     std::unique_ptr<APVTS::ComboBoxAttachment> aTarget;
     juce::TextButton match { "Match target" }, reset { "Reset" };
+    juce::ToggleButton autoLevel { "Auto level to target" }, limiterOn { "Limiter" };
+    juce::Slider ceiling, custom;
+    juce::Label ceilingL, customL;
+    std::unique_ptr<APVTS::ButtonAttachment> aAutoLevel, aLimiter;
+    std::unique_ptr<APVTS::SliderAttachment> aCeiling, aCustom;
+    float grShown = 0;
     juce::String status;
     arc::LoudnessMeter::Readings r;
     std::vector<float> history;   // momentary loudness, 10 per second
@@ -88,8 +94,11 @@ private:
     juce::ComboBox profile, mode;
     juce::Slider amount;
     juce::TextButton relearn { "Re-learn" }, commit { "Turn into bands" };
-    std::unique_ptr<APVTS::ComboBoxAttachment> aProfile, aMode;
-    std::unique_ptr<APVTS::SliderAttachment> aAmount;
+    std::unique_ptr<APVTS::ComboBoxAttachment> aProfile, aMode, aSmooth;
+    std::unique_ptr<APVTS::SliderAttachment> aAmount, aTilt, aBass, aBoost, aCut;
+    juce::Slider tilt, bass, boost, cut;
+    juce::Label tiltL, bassL, boostL, cutL;
+    juce::ComboBox smooth;
     PotatoEQProcessor::AutoSnapshot snap;
     juce::String status;
 };

@@ -95,6 +95,17 @@ void Knob::resized()
     slider.setBounds (r);
 }
 
+static void setupSmallSlider (Component& parent, Slider& sl, Label& l, const String& text, Colour c)
+{
+    sl.setSliderStyle (Slider::LinearHorizontal);
+    sl.setTextBoxStyle (Slider::TextBoxRight, false, 74, 16);
+    sl.setColour (Slider::trackColourId, c);
+    l.setText (text, dontSendNotification);
+    l.setFont (theme::font (11.0f));
+    l.setColour (Label::textColourId, theme::textDim);
+    parent.addAndMakeVisible (sl); parent.addAndMakeVisible (l);
+}
+
 void fillCombo (ComboBox& c, APVTS& s, const String& paramId)
 {
     c.clear (dontSendNotification);
@@ -113,7 +124,9 @@ BandPanel::BandPanel (PotatoEQProcessor& p) : proc (p)
     typeL.setText ("SHAPE", dontSendNotification); slopeL.setText ("SLOPE", dontSendNotification); placeL.setText ("STEREO", dontSendNotification);
     for (auto* c : { &type, &slope, &place }) addAndMakeVisible (*c);
     for (auto* k : { &freq, &gain, &q, &thr, &range }) addAndMakeVisible (*k);
-    for (auto* b : { (Component*) &dyn, (Component*) &bypass, (Component*) &del }) addAndMakeVisible (*b);
+    for (auto* b : { (Component*) &dyn, (Component*) &sc, (Component*) &bypass, (Component*) &del }) addAndMakeVisible (*b);
+    sc.setTooltip ("Dynamic detection listens to the plugin's sidechain input instead of this track "
+                   "(e.g. duck the bass at 60 Hz only when the kick hits). Route a track to the sidechain in your DAW.");
     thr.slider.setColour (Slider::rotarySliderFillColourId, theme::autoCol);
     range.slider.setColour (Slider::rotarySliderFillColourId, theme::autoCol);
     del.onClick = [this] { if (band >= 0 && onDelete) onDelete (band); };
@@ -126,7 +139,7 @@ BandPanel::~BandPanel() { stopTimer(); }
 
 void BandPanel::setBand (int b)
 {
-    aType.reset(); aSlope.reset(); aPlace.reset(); aFreq.reset(); aGain.reset(); aQ.reset(); aThr.reset(); aRange.reset(); aDyn.reset(); aBypass.reset();
+    aType.reset(); aSlope.reset(); aPlace.reset(); aFreq.reset(); aGain.reset(); aQ.reset(); aThr.reset(); aRange.reset(); aDyn.reset(); aBypass.reset(); aSc.reset();
     band = b;
     for (int i = 0; i < getNumChildComponents(); ++i) getChildComponent (i)->setVisible (b >= 0);
     if (b >= 0)
@@ -143,6 +156,7 @@ void BandPanel::setBand (int b)
         aRange = std::make_unique<APVTS::SliderAttachment> (s, params::bandId (b, "range"), range.slider);
         aDyn = std::make_unique<APVTS::ButtonAttachment> (s, params::bandId (b, "dyn"), dyn);
         aBypass = std::make_unique<APVTS::ButtonAttachment> (s, params::bandId (b, "bypass"), bypass);
+        aSc = std::make_unique<APVTS::ButtonAttachment> (s, params::bandId (b, "sc"), sc);
         const auto c = theme::bandColour (b);
         for (auto* k : { &freq, &gain, &q }) k->slider.setColour (Slider::rotarySliderFillColourId, c);
         timerCallback();
@@ -159,7 +173,7 @@ void BandPanel::timerCallback()
     slope.setEnabled (arc::typeHasSlope (s.type));
     dyn.setEnabled (arc::typeSupportsDynamic (s.type));
     const bool dynOn = s.dynamic && arc::typeSupportsDynamic (s.type);
-    thr.setEnabled (dynOn); range.setEnabled (dynOn);
+    thr.setEnabled (dynOn); range.setEnabled (dynOn); sc.setEnabled (dynOn);
     repaint();
 }
 
@@ -195,9 +209,9 @@ void BandPanel::resized()
     r.removeFromLeft (12);
     for (auto* k : { &freq, &gain, &q }) k->setBounds (r.removeFromLeft (84));
     r.removeFromLeft (16);
-    auto dcol = r.removeFromLeft (100);
-    dyn.setBounds (dcol.removeFromTop (26)); bypass.setBounds (dcol.removeFromTop (26));
-    dcol.removeFromTop (10); del.setBounds (dcol.removeFromTop (24));
+    auto dcol = r.removeFromLeft (104);
+    dyn.setBounds (dcol.removeFromTop (24)); sc.setBounds (dcol.removeFromTop (24)); bypass.setBounds (dcol.removeFromTop (24));
+    dcol.removeFromTop (4); del.setBounds (dcol.removeFromTop (22));
     for (auto* k : { &thr, &range }) k->setBounds (r.removeFromLeft (84));
 }
 
@@ -210,6 +224,15 @@ LoudnessPanel::LoudnessPanel (PotatoEQProcessor& p) : proc (p)
     match.setTooltip ("Sets the output gain so the integrated loudness hits the target, without pushing the true peak above -1 dBTP. "
                       "Reaching loud targets needs a limiter after this EQ.");
     reset.onClick = [this] { proc.resetMeter(); history.clear(); status = {}; };
+    aAutoLevel = std::make_unique<APVTS::ButtonAttachment> (proc.apvts, params::id::autoLevel, autoLevel);
+    aLimiter = std::make_unique<APVTS::ButtonAttachment> (proc.apvts, params::id::limiter, limiterOn);
+    autoLevel.setTooltip ("Continuously sets the gain so the track lands on the loudness target. Turn the limiter on for loud targets.");
+    limiterOn.setTooltip ("Brickwall look-ahead limiter at the end of the chain. Catches peaks so louder targets don't clip.");
+    addAndMakeVisible (autoLevel); addAndMakeVisible (limiterOn);
+    setupSmallSlider (*this, ceiling, ceilingL, "Ceiling", theme::bad.withAlpha (0.8f));
+    setupSmallSlider (*this, custom, customL, "Custom target", theme::accent);
+    aCeiling = std::make_unique<APVTS::SliderAttachment> (proc.apvts, params::id::ceiling, ceiling);
+    aCustom = std::make_unique<APVTS::SliderAttachment> (proc.apvts, params::id::lufsCustom, custom);
     match.onClick = [this]
     {
         const auto m = proc.matchLoudnessToTarget();
@@ -226,6 +249,10 @@ LoudnessPanel::~LoudnessPanel() { stopTimer(); }
 void LoudnessPanel::timerCallback()
 {
     r = proc.meter.get();
+    grShown = jmax (proc.limiterReductionDb(), grShown * 0.85f);
+    const bool isCustom = params::lufsTargets()[(size_t) jlimit (0, (int) params::lufsTargets().size() - 1, target.getSelectedId() - 1)].lufs > 0;
+    custom.setEnabled (isCustom); customL.setEnabled (isCustom);
+    ceiling.setEnabled (limiterOn.getToggleState());
     if (++tick % 2 == 0)
     {
         history.push_back (r.momentary);
@@ -241,7 +268,7 @@ void LoudnessPanel::paint (Graphics& g)
     g.setColour (theme::text); g.setFont (theme::font (13.0f, true));
     g.drawText ("LOUDNESS  (output)", r0.removeFromTop (18), Justification::centredLeft);
 
-    const float tgt = params::lufsTargets()[(size_t) jlimit (0, (int) params::lufsTargets().size() - 1, target.getSelectedId() - 1)].lufs;
+    const float tgt = proc.targetLufs();
     auto fmt = [] (float v) { return v <= -69.9f ? String ("--") : String (v, 1); };
 
     auto big = r0.removeFromTop (54);
@@ -270,6 +297,12 @@ void LoudnessPanel::paint (Graphics& g)
     row ("Momentary (400 ms)", fmt (r.momentary) + " LUFS", theme::text);
     row ("Loudness range", String (r.lra, 1) + " LU", theme::text);
     row ("True peak", fmt (r.truePeakDb) + " dBTP", r.truePeakDb > -1.0f ? theme::bad : theme::text);
+    {
+        String extra;
+        if (std::abs (proc.autoLevelDb()) > 0.05f) extra << "Auto level " << (proc.autoLevelDb() > 0 ? "+" : "") << String (proc.autoLevelDb(), 1) << " dB";
+        if (limiterOn.getToggleState()) extra << (extra.isEmpty() ? "" : "   ") << "Limiting " << String (grShown, 1) << " dB";
+        row (extra.isEmpty() ? String() : String ("Gain"), extra, grShown > 3.0f ? theme::warn : theme::accent);
+    }
 
     // history graph with the target line
     r0.removeFromTop (6);
@@ -300,13 +333,19 @@ void LoudnessPanel::paint (Graphics& g)
 void LoudnessPanel::resized()
 {
     auto r = getLocalBounds().reduced (12, 10);
-    r.removeFromTop (18 + 54 + 18 * 4 + 6 + 60 + 8);
+    r.removeFromTop (18 + 54 + 18 * 5 + 6 + 60 + 8);
     target.setBounds (r.removeFromTop (24));
+    r.removeFromTop (4);
+    auto cr = r.removeFromTop (20); customL.setBounds (cr.removeFromLeft (90)); custom.setBounds (cr);
     r.removeFromTop (6);
     auto row = r.removeFromTop (26);
     reset.setBounds (row.removeFromRight (64));
     row.removeFromRight (6);
     match.setBounds (row);
+    r.removeFromTop (6);
+    auto t2 = r.removeFromTop (24);
+    limiterOn.setBounds (t2.removeFromRight (90)); autoLevel.setBounds (t2);
+    auto cl = r.removeFromTop (20); ceilingL.setBounds (cl.removeFromLeft (90)); ceiling.setBounds (cl);
 }
 
 // ---------------------------------------------------------------- auto EQ panel
@@ -323,6 +362,20 @@ AutoPanel::AutoPanel (PotatoEQProcessor& p) : proc (p)
     aAmount = std::make_unique<APVTS::SliderAttachment> (proc.apvts, params::id::autoAmount, amount);
     for (auto* c : { (Component*) &profile, (Component*) &mode, (Component*) &amount, (Component*) &relearn, (Component*) &commit }) addAndMakeVisible (*c);
 
+    setupSmallSlider (*this, tilt, tiltL, "Brightness", theme::autoCol);
+    setupSmallSlider (*this, bass, bassL, "Low end", theme::autoCol);
+    setupSmallSlider (*this, boost, boostL, "Max boost", theme::autoCol);
+    setupSmallSlider (*this, cut, cutL, "Max cut", theme::autoCol);
+    aTilt = std::make_unique<APVTS::SliderAttachment> (proc.apvts, params::id::autoTilt, tilt);
+    aBass = std::make_unique<APVTS::SliderAttachment> (proc.apvts, params::id::autoBass, bass);
+    aBoost = std::make_unique<APVTS::SliderAttachment> (proc.apvts, params::id::autoMaxBoost, boost);
+    aCut = std::make_unique<APVTS::SliderAttachment> (proc.apvts, params::id::autoMaxCut, cut);
+    fillCombo (smooth, proc.apvts, params::id::autoSmooth);
+    aSmooth = std::make_unique<APVTS::ComboBoxAttachment> (proc.apvts, params::id::autoSmooth, smooth);
+    addAndMakeVisible (smooth);
+    tilt.setTooltip ("Tilts the target curve: negative = darker/warmer, positive = brighter.");
+    bass.setTooltip ("Asks for more (or less) low end than the profile.");
+    smooth.setTooltip ("Broad follows only the overall tonal balance; Fine also corrects narrower bumps.");
     mode.setTooltip ("Learn: listens for ~12 s of audio, then holds the EQ.  Live: keeps listening and adapts as the song changes.");
     commit.setTooltip ("Copies the auto EQ into regular bands you can tweak, then switches the auto EQ off.");
     relearn.onClick = [this] { proc.startLearning(); status = "Listening..."; };
@@ -351,7 +404,7 @@ void AutoPanel::paint (Graphics& g)
     auto r = getLocalBounds().reduced (12, 10);
     g.setColour (theme::text); g.setFont (theme::font (13.0f, true));
     g.drawText ("AUTO EQ", r.removeFromTop (18), Justification::centredLeft);
-    r.removeFromTop (24 + 6 + 24 + 6 + 22 + 8);
+    r.removeFromTop (24 + 6 + 24 + 6 + 22 + 6 + 5 * 22 + 6);
 
     auto graph = r.removeFromTop (r.getHeight() - 40).toFloat();
     g.setColour (theme::bg); g.fillRoundedRectangle (graph, 4);
@@ -415,11 +468,10 @@ void AutoPanel::paint (Graphics& g)
         }
     }
 
+    g.setColour (theme::textDim); g.setFont (theme::font (11.0f));
+    g.drawText ("Detail", smooth.getBounds().withX (getLocalBounds().getX() + 15).withWidth (70), Justification::centredLeft);
     if (status.isNotEmpty())
-    {
-        g.setColour (theme::textDim); g.setFont (theme::font (11.0f));
         g.drawText (status, getLocalBounds().reduced (12, 6).removeFromBottom (14), Justification::centredLeft);
-    }
 }
 
 void AutoPanel::resized()
@@ -431,6 +483,14 @@ void AutoPanel::resized()
     mode.setBounds (row.removeFromLeft (row.getWidth() / 2 - 3)); row.removeFromLeft (6); relearn.setBounds (row);
     r.removeFromTop (6);
     amount.setBounds (r.removeFromTop (22));
+    r.removeFromTop (6);
+    for (auto pr : { std::pair<Label*, Slider*> { &tiltL, &tilt }, { &bassL, &bass }, { &boostL, &boost }, { &cutL, &cut } })
+    {
+        auto row2 = r.removeFromTop (22);
+        pr.first->setBounds (row2.removeFromLeft (80)); pr.second->setBounds (row2);
+    }
+    auto srow = r.removeFromTop (22).reduced (0, 1);
+    smooth.setBounds (srow.withTrimmedLeft (80));
     auto bottom = getLocalBounds().reduced (12, 8).withTrimmedBottom (16).removeFromBottom (24);
     commit.setBounds (bottom);
 }

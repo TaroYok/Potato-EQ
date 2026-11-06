@@ -56,6 +56,7 @@ struct BandSettings
     Placement place = Placement::Stereo;
     bool dynamic = false;
     double thresholdDb = -24.0, rangeDb = -6.0;
+    bool sidechain = false;   // dynamic detection listens to the external sidechain input
 
     bool active() const { return used && ! bypass; }
 };

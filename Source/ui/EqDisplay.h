@@ -70,6 +70,13 @@ private:
     std::array<std::unique_ptr<juce::dsp::FFT>, kMaxOrder + 1> ffts;
     int fftOrder = 13;
     std::vector<float> fftData, window;
-    Spectrum pre, post;
+    Spectrum pre, post, side;
     std::array<arc::BandSettings, arc::kNumBands> bands;
+
+    // per-band response curves are cached and only recomputed when a band changes
+    struct CurveCache { std::vector<float> db; arc::BandSettings key; double eff = 1e9, fs = 0; float width = 0; };
+    std::array<CurveCache, arc::kNumBands> curveCache;
+    CurveCache autoCache;
+    std::array<double, arc::kAutoBells> autoKey {};
+    const std::vector<float>& bandCurve (int band, const arc::BandSettings&, double effGain, int cols);
 };
