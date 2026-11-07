@@ -100,7 +100,11 @@ jobs:
       - name: Installer checksum
         if: runner.os != 'Linux'
         shell: bash
-        run: cd installers && for f in *; do shasum -a 256 "$f" >> SHA256SUMS.txt; done; cat SHA256SUMS.txt
+        run: |
+          cd installers
+          if command -v sha256sum >/dev/null; then sum="sha256sum"; else sum="shasum -a 256"; fi
+          for f in *; do $sum "$f" >> SHA256SUMS.txt; done
+          cat SHA256SUMS.txt
 
       - name: Upload installer
         if: runner.os != 'Linux'
