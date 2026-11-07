@@ -65,7 +65,7 @@ PotatoEQEditor::~PotatoEQEditor() { setLookAndFeel (nullptr); }
 void PotatoEQEditor::showAnalyzerMenu()
 {
     auto& st = proc.apvts.state;
-    PopupMenu m, res, spd, tlt, rng;
+    PopupMenu m, res, spd, tlt, rng, smo;
     auto fill = [&] (PopupMenu& sub, const StringArray& names, const Identifier& id, int def, int base)
     {
         const int cur = ana::get (st, id, def);
@@ -75,10 +75,12 @@ void PotatoEQEditor::showAnalyzerMenu()
     fill (spd, ana::speedNames, ana::speed, 1, 200);
     fill (tlt, ana::tiltNames, ana::tilt, 2, 300);
     fill (rng, ana::rangeNames, ana::range, 1, 400);
+    fill (smo, ana::smoothingNames, ana::smoothing, 2, 500);
     m.addSubMenu ("Resolution", res);
     m.addSubMenu ("Speed", spd);
     m.addSubMenu ("Tilt", tlt);
     m.addSubMenu ("Range", rng);
+    m.addSubMenu ("Smoothing", smo);
     m.addSeparator();
     m.addItem (1, "Peak hold", true, ana::get (st, ana::peakHold, 0) != 0);
     m.addItem (2, "Clear peak hold");
@@ -94,6 +96,7 @@ void PotatoEQEditor::showAnalyzerMenu()
         else if (r == 2) safe->display.clearPeakHold();
         else if (r == 3) s.setProperty (ana::showSc, ana::get (s, ana::showSc, 1) ? 0 : 1, nullptr);
         else if (r == 5) s.setProperty (ana::collide, ana::get (s, ana::collide, 1) ? 0 : 1, nullptr);
+        else if (r >= 500) s.setProperty (ana::smoothing, r - 500, nullptr);
         else if (r >= 400) s.setProperty (ana::range, r - 400, nullptr);
         else if (r >= 300) s.setProperty (ana::tilt, r - 300, nullptr);
         else if (r >= 200) s.setProperty (ana::speed, r - 200, nullptr);

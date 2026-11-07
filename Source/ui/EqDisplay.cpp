@@ -70,24 +70,35 @@ void EqDisplay::pullSpectrum (SampleFifo& fifo, Spectrum& s, bool analyse)
     static const float release[] = { 0.05f, 0.12f, 0.3f }, attack[] = { 0.45f, 0.6f, 0.9f };
     const int sp = jlimit (0, 2, setting (ana::speed, 1));
     const bool hold = setting (ana::peakHold, 0) != 0;
+    // Fractional-octave smoothing: average the *power* over a band around each column
+    // (prefix sums make this O(1) per column). Averaging power instead of picking single
+    // bins removes the spiky look at the low end, where there are fewer bins than pixels.
+    static const double widthOct[] = { 1.0 / 48.0, 1.0 / 24.0, 1.0 / 12.0, 1.0 / 6.0, 1.0 / 3.0 };
+    const double width = widthOct[jlimit (0, 4, setting (ana::smoothing, 2))];
+    const int nb = size / 2 + 1;
+    cum.resize ((size_t) nb + 1);
+    cum[0] = 0.0;
+    const double norm = 4.0 / size;
+    for (int k = 0; k < nb; ++k) { const double amp = fftData[(size_t) k] * norm; cum[(size_t) k + 1] = cum[(size_t) k] + (k < 2 ? 0.0 : amp * amp); }
+    auto energyUpTo = [&] (double x)   // integral of bin power from 0 to x (bin k covers [k-0.5, k+0.5])
+    {
+        const double p = jlimit (0.0, (double) nb, x + 0.5);
+        const int i = jmin (nb - 1, (int) p);
+        return cum[(size_t) i] + (p - i) * (cum[(size_t) i + 1] - cum[(size_t) i]);
+    };
     const auto a = plotArea();
     for (size_t c = 0; c < s.display.size(); ++c)
     {
         const float x0 = a.getX() + (float) c * kColStep;
         const double f0 = freqForX (x0), f1 = freqForX (x0 + kColStep);
-        const int b0 = (int) std::floor (f0 / binHz), b1 = (int) std::ceil (f1 / binHz);
-        float m = 0.0f;
-        if (b1 - b0 <= 1)
-        {   // fewer bins than pixels at the low end: interpolate
-            const double fb = 0.5 * (f0 + f1) / binHz;
-            const int k = jlimit (0, size / 2 - 1, (int) fb);
-            const float t = (float) (fb - k);
-            m = fftData[(size_t) k] * (1 - t) + fftData[(size_t) k + 1] * t;
-        }
-        else for (int k = jmax (0, b0); k <= jmin (size / 2, b1); ++k) m = jmax (m, fftData[(size_t) k]);
+        const double fcol = std::sqrt (f0 * f1);
+        double lo = fcol * std::pow (2.0, -width / 2) / binHz, hi = fcol * std::pow (2.0, width / 2) / binHz;
+        if (hi - lo < 2.0) { const double mid = 0.5 * (lo + hi); lo = mid - 1.0; hi = mid + 1.0; }   // at least the window's main lobe
+        lo = jmax (1.5, lo);
+        const double power = hi > lo ? (energyUpTo (hi) - energyUpTo (lo)) / (hi - lo) : 0.0;
+        const float m = (float) std::sqrt (jmax (0.0, power)) / (float) norm;   // back to the FFT magnitude scale used below
 
-        const double fc = 0.5 * (f0 + f1);
-        const double db = Decibels::gainToDecibels (m * 4.0f / (float) size, -150.0f) + tilt * std::log2 (fc / 1000.0);
+        const double db = Decibels::gainToDecibels (m * 4.0f / (float) size, -150.0f) + tilt * std::log2 (fcol / 1000.0);
         auto& d = s.display[c];
         d = (float) (db > d ? d + (db - d) * attack[sp] : d + (db - d) * release[sp]);
         s.peak[c] = hold ? jmax (s.peak[c], d) : -150.0f;
@@ -238,11 +249,16 @@ void EqDisplay::paint (Graphics& g)
     {
         Path p;
         if (closed) p.startNewSubPath (a.getX(), a.getBottom());
+        // quadratic curves through the midpoints between columns: smooth, no corners
+        Point<float> prev;
         for (size_t i = 0; i < d.size(); ++i)
         {
-            const float x = a.getX() + (float) i * kColStep, y = yForSpectrum (d[i]);
-            if (! closed && i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+            const Point<float> pt (a.getX() + (float) i * kColStep, yForSpectrum (d[i]));
+            if (i == 0) { if (closed) p.lineTo (pt); else p.startNewSubPath (pt); }
+            else p.quadraticTo (prev, (prev + pt) * 0.5f);
+            prev = pt;
         }
+        if (! d.empty()) p.lineTo (prev);
         if (closed) { p.lineTo (a.getRight(), a.getBottom()); p.closeSubPath(); }
         return p;
     };

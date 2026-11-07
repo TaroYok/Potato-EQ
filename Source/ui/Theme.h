@@ -55,7 +55,8 @@ namespace ana
 {
     inline const juce::Identifier freeze ("anaFreeze"), peakHold ("anaPeakHold"), resolution ("anaRes"),
                                   speed ("anaSpeed"), tilt ("anaTilt"), range ("anaRange"),
-                                  showSc ("anaShowSc"), collide ("anaCollide");
+                                  showSc ("anaShowSc"), collide ("anaCollide"), smoothing ("anaSmooth");
+    inline const juce::StringArray smoothingNames { "Off (1/48 oct)", "Light (1/24 oct)", "Medium (1/12 oct)", "Heavy (1/6 oct)", "Very heavy (1/3 oct)" };
     inline const juce::StringArray resolutionNames { "Low", "Medium", "High", "Maximum" };   // FFT 2k/4k/8k/16k
     inline const juce::StringArray speedNames { "Slow", "Medium", "Fast" };
     inline const juce::StringArray tiltNames { "0 dB/oct", "3 dB/oct", "4.5 dB/oct", "6 dB/oct" };

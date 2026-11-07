@@ -70,6 +70,7 @@ private:
     std::array<std::unique_ptr<juce::dsp::FFT>, kMaxOrder + 1> ffts;
     int fftOrder = 13;
     std::vector<float> fftData, window;
+    std::vector<double> cum;   // prefix sums of bin power (spectrum smoothing)
     Spectrum pre, post, side;
     std::array<arc::BandSettings, arc::kNumBands> bands;
 
