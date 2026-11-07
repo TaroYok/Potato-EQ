@@ -6,3 +6,5 @@ dist/
 .idea/
 *.user
 .DS_Store
+installers/
+build-pkg/

@@ -1,5 +1,13 @@
 POTATO EQ - installing
 
+Easiest: run the installer (PotatoEQ-x.y.z-Windows-Setup.exe or PotatoEQ-x.y.z-macOS.pkg).
+  Windows: if SmartScreen says "Windows protected your PC", click "More info" > "Run anyway"
+           (the installer isn't code-signed yet).
+  macOS:   if it says the package can't be opened, go to System Settings > Privacy & Security
+           and click "Open Anyway" (the installer isn't signed by Apple yet).
+
+Manual install (copying the files yourself):
+
 Windows (FL Studio, Ableton, Reaper, Studio One, Cubase, Bitwig ...)
   1. Copy the "Potato EQ.vst3" folder to:  C:\Program Files\Common Files\VST3
   2. In FL Studio: Options > Manage plugins > Find more plugins (or Find installed plugins).

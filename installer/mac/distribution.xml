@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Potato EQ __VERSION__</title>
+    <welcome file="welcome.txt"/>
+    <options customize="allow" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <domains enable_localSystem="true"/>
+    <choices-outline>
+        <line choice="vst3"/>
+        <line choice="au"/>
+        <line choice="app"/>
+    </choices-outline>
+    <choice id="vst3" title="VST3 plugin" description="For Ableton Live, FL Studio, Reaper, Studio One, Cubase, Bitwig and most other DAWs.">
+        <pkg-ref id="com.taroyaudio.potatoeq.vst3"/>
+    </choice>
+    <choice id="au" title="Audio Unit plugin" description="For Logic Pro and GarageBand.">
+        <pkg-ref id="com.taroyaudio.potatoeq.au"/>
+    </choice>
+    <choice id="app" title="Standalone app" description="Use Potato EQ without a DAW. Installed in Applications.">
+        <pkg-ref id="com.taroyaudio.potatoeq.app"/>
+    </choice>
+    <pkg-ref id="com.taroyaudio.potatoeq.vst3">vst3.pkg</pkg-ref>
+    <pkg-ref id="com.taroyaudio.potatoeq.au">au.pkg</pkg-ref>
+    <pkg-ref id="com.taroyaudio.potatoeq.app">app.pkg</pkg-ref>
+</installer-gui-script>

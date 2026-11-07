@@ -1,0 +1,7 @@
+Potato EQ
+
+A 24-band EQ with spectrum analyzer, LUFS meter, limiter and Auto EQ.
+
+This installs the plugin into your system's Audio Plug-Ins folders. Click "Customize" on the next screen to choose which formats to install (VST3, Audio Unit, standalone app).
+
+After installing, restart your DAW (or rescan plugins) to find Potato EQ.

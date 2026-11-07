@@ -2,7 +2,7 @@ name: Build plugin
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, installers ]
     tags: [ "v*" ]
   pull_request:
   workflow_dispatch:
@@ -71,11 +71,37 @@ jobs:
           if [ -f screenshot.png ]; then cp screenshot.png dist/; fi
           cp INSTALL.txt dist/
 
+      - name: Version
+        id: ver
+        shell: bash
+        run: echo "v=$(sed -n 's/^project(PotatoEQ VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.ver.outputs.v }}" installer\windows\PotatoEQ.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: macOS installer
+        if: runner.os == 'macOS'
+        run: |
+          installer/mac/build-pkg.sh "${{ steps.ver.outputs.v }}"
+          pkgutil --payload-files installers/*.pkg | head -20
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: PotatoEQ-${{ matrix.name }}
           path: dist
+
+      - name: Upload installer
+        if: runner.os != 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PotatoEQ-${{ matrix.name }}-Installer
+          path: installers
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -85,8 +111,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Zip
-        run: cd artifacts && for d in */; do (cd "$d" && zip -qr "../${d%/}.zip" .); done
+      - name: Zip plugin folders, keep installers as-is
+        run: |
+          cd artifacts
+          for d in */; do case "$d" in *-Installer/) mv "$d"* . ;; *) (cd "$d" && zip -qr "../${d%/}.zip" .) ;; esac; done
+          ls -la
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.zip
+          files: |
+            artifacts/*.zip
+            artifacts/*.exe
+            artifacts/*.pkg
