@@ -525,7 +525,7 @@ void EqDisplay::drawStyledSpectrum (Graphics& g, const Spectrum& s, const theme:
 
     if (style == 3)
     {   // slices: Riemann-sum bars, each coloured by its own level
-        const float w = 1.0f, gap = 2.0f;   // one-pixel lines, every 3 px
+        const float w = 1.0f, gap = 0.0f;   // one-pixel lines side by side
         for (float x = std::round (a.getX()); x < a.getRight(); x += w + gap)   // pixel-aligned so lines stay crisp
         {
             const int c0 = (int) ((x - a.getX()) / kColStep), c1 = jmin ((int) s.display.size() - 1, (int) ((x + w - a.getX()) / kColStep));

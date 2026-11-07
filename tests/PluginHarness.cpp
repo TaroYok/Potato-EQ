@@ -419,6 +419,14 @@ int main (int argc, char** argv)
             p->apvts.state.setProperty (ana::fill, lk.fill, nullptr);
             p->apvts.state.setProperty (ana::palette, lk.palette, nullptr);
             for (int i = 0; i < 40; ++i) { run (*p, 0.03, pinkish); pump (25); }
+            if (lk.fill == 3)
+                for (auto* c : ed->getChildren())
+                    if (auto* d = dynamic_cast<EqDisplay*> (c))
+                    {
+                        const auto t1 = Time::getMillisecondCounterHiRes();
+                        for (int i = 0; i < 20; ++i) d->createComponentSnapshot (d->getLocalBounds(), true, 1.0f);
+                        std::printf ("      slices repaint: %.1f ms\n", (Time::getMillisecondCounterHiRes() - t1) / 20.0);
+                    }
             auto im = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
             File sf = f.getSiblingFile (f.getFileNameWithoutExtension() + "-" + lk.name + ".png");
             sf.deleteFile();
