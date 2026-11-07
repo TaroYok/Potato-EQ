@@ -23,6 +23,8 @@ public:
     int getSelected() const { return selected; }
     void setSelected (int b);
     void clearPeakHold();
+    bool isDragging() const { return dragging >= 0; }
+    juce::Point<float> bandNodePosition (int b) const { return nodePosition (bands[(size_t) b]); }
     void showMessage (const juce::String& m) { message = m; messageUntil = juce::Time::getMillisecondCounter() + 5000; repaint(); }
     std::function<void (int)> onSelectionChanged;
 

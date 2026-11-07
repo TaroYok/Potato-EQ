@@ -44,8 +44,10 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
 
     for (auto* c : { (Component*) &phase, (Component*) &analyzer, (Component*) &range, (Component*) &autoGain,
                      (Component*) &freeze, (Component*) &anaMenu, (Component*) &presetBtn,
-                     (Component*) &display, (Component*) &bandPanel, (Component*) &loudness, (Component*) &autoPanel })
+                     (Component*) &display, (Component*) &loudness, (Component*) &autoPanel })
         addAndMakeVisible (*c);
+    addChildComponent (bandPanel);   // floats over the display next to the selected band
+    startTimerHz (30);
 
     display.onSelectionChanged = [this] (int b) { bandPanel.setBand (b); };
     bandPanel.onDelete = [this] (int b)
@@ -60,7 +62,23 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
     setSize (1360, 860);
 }
 
-PotatoEQEditor::~PotatoEQEditor() { setLookAndFeel (nullptr); }
+PotatoEQEditor::~PotatoEQEditor() { stopTimer(); setLookAndFeel (nullptr); }
+
+void PotatoEQEditor::timerCallback()
+{
+    const int b = display.getSelected();
+    const bool show = b >= 0 && proc.bandSettings (b).used && ! display.isDragging();
+    if (! show) { if (bandPanel.isVisible()) bandPanel.setVisible (false); return; }
+    const auto d = display.getBounds();
+    const auto node = display.bandNodePosition (b) + d.getPosition().toFloat();
+    const int w = jmin (BandPanel::kWidth, d.getWidth() - 8), h = BandPanel::kHeight;
+    int x = jlimit (d.getX() + 4, d.getRight() - w - 4, (int) node.x - w / 2);
+    int y = node.y < d.getCentreY() ? (int) node.y + 22 : (int) node.y - 22 - h;   // below the node in the top half, above it in the bottom half
+    y = jlimit (d.getY() + 4, d.getBottom() - h - 18, y);
+    const Rectangle<int> r (x, y, w, h);
+    if (bandPanel.getBounds() != r) bandPanel.setBounds (r);
+    if (! bandPanel.isVisible()) { bandPanel.setVisible (true); bandPanel.toFront (false); }
+}
 
 void PotatoEQEditor::showAnalyzerMenu()
 {
@@ -84,6 +102,7 @@ void PotatoEQEditor::showAnalyzerMenu()
     m.addSeparator();
     m.addItem (1, "Peak hold", true, ana::get (st, ana::peakHold, 0) != 0);
     m.addItem (2, "Clear peak hold");
+    m.addItem (6, "Note grid (C1, C2 ...)", true, ana::get (st, ana::noteGrid, 1) != 0);
     m.addSeparator();
     m.addItem (3, "Show sidechain spectrum", true, ana::get (st, ana::showSc, 1) != 0);
     m.addItem (5, "Highlight collisions with sidechain", true, ana::get (st, ana::collide, 1) != 0);
@@ -94,6 +113,7 @@ void PotatoEQEditor::showAnalyzerMenu()
         auto& s = safe->proc.apvts.state;
         if (r == 1) { s.setProperty (ana::peakHold, ana::get (s, ana::peakHold, 0) ? 0 : 1, nullptr); safe->display.clearPeakHold(); }
         else if (r == 2) safe->display.clearPeakHold();
+        else if (r == 6) s.setProperty (ana::noteGrid, ana::get (s, ana::noteGrid, 1) ? 0 : 1, nullptr);
         else if (r == 3) s.setProperty (ana::showSc, ana::get (s, ana::showSc, 1) ? 0 : 1, nullptr);
         else if (r == 5) s.setProperty (ana::collide, ana::get (s, ana::collide, 1) ? 0 : 1, nullptr);
         else if (r >= 500) s.setProperty (ana::smoothing, r - 500, nullptr);
@@ -161,7 +181,5 @@ void PotatoEQEditor::resized()
     loudness.setBounds (side.removeFromTop (440));
     side.removeFromTop (10);
     autoPanel.setBounds (side);
-    bandPanel.setBounds (r.removeFromBottom (122));
-    r.removeFromBottom (10);
     display.setBounds (r);
 }

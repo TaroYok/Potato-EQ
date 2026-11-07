@@ -272,6 +272,9 @@ int main (int argc, char** argv)
         std::unique_ptr<AudioProcessorEditor> ed (p->createEditor());
         ed->setSize (1360, 860);
         for (int i = 0; i < 30; ++i) { run (*p, 0.05, pinkish); pump (30); }
+        for (auto* c : ed->getChildren())   // show the floating band panel in the screenshot
+            if (auto* d = dynamic_cast<EqDisplay*> (c)) d->setSelected (2);
+        pump (200);
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
         {
             const auto t0 = Time::getMillisecondCounterHiRes();

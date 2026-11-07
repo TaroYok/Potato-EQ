@@ -91,7 +91,8 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
             AudioParameterFloatAttributes().withLabel ("Hz").withStringFromValueFunction ([] (float v, int)
                 { return v >= 1000 ? String (v / 1000.f, 2) + " kHz" : String (v, v < 100 ? 1 : 0) + " Hz"; })));
         group->addChild (std::make_unique<AudioParameterFloat> (pid (bandId (b, "gain")), n + "Gain", NormalisableRange<float> (-30.f, 30.f, 0.01f), 0.f, dbAttr));
-        group->addChild (std::make_unique<AudioParameterFloat> (pid (bandId (b, "q")), n + "Q", logRange (0.025f, 40.f), 1.f));
+        group->addChild (std::make_unique<AudioParameterFloat> (pid (bandId (b, "q")), n + "Q", logRange (0.025f, 40.f), 1.f,
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, v < 10 ? 2 : 1); })));
         group->addChild (std::make_unique<AudioParameterChoice> (pid (bandId (b, "slope")), n + "Slope", slopes, 3));
         group->addChild (std::make_unique<AudioParameterChoice> (pid (bandId (b, "place")), n + "Stereo", places, 0));
         group->addChild (std::make_unique<AudioParameterBool> (pid (bandId (b, "dyn")), n + "Dynamic", false));

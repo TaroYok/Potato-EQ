@@ -119,8 +119,10 @@ BandPanel::BandPanel (PotatoEQProcessor& p) : proc (p)
     for (auto* l : { &typeL, &slopeL, &placeL })
     {
         l->setFont (theme::font (10.5f, true)); l->setColour (Label::textColourId, theme::textDim);
-        l->setJustificationType (Justification::centredLeft); addAndMakeVisible (*l);
+        l->setJustificationType (Justification::centredLeft);   // compact floating panel: combos speak for themselves
     }
+    type.setTooltip ("Band shape"); slope.setTooltip ("Slope (cuts and shelves)"); place.setTooltip ("Stereo placement");
+    shadow.setOwner (this);
     typeL.setText ("SHAPE", dontSendNotification); slopeL.setText ("SLOPE", dontSendNotification); placeL.setText ("STEREO", dontSendNotification);
     for (auto* c : { &type, &slope, &place }) addAndMakeVisible (*c);
     for (auto* k : { &freq, &gain, &q, &thr, &range }) addAndMakeVisible (*k);
@@ -179,40 +181,37 @@ void BandPanel::timerCallback()
 
 void BandPanel::paint (Graphics& g)
 {
-    g.setColour (theme::panel); g.fillRoundedRectangle (getLocalBounds().toFloat(), 6);
-    if (band < 0)
-    {
-        g.setColour (theme::textDim); g.setFont (theme::font (13.0f));
-        g.drawText ("Select a band (or double-click the display to add one) to edit it here.", getLocalBounds(), Justification::centred);
-        return;
-    }
-    auto r = getLocalBounds().reduced (12, 8);
+    const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (theme::panel.withAlpha (0.97f)); g.fillRoundedRectangle (bounds, 8);
+    if (band < 0) return;
     const auto c = theme::bandColour (band);
-    g.setColour (c); g.fillEllipse (Rectangle<float> ((float) r.getX(), (float) r.getY() + 2, 14, 14));
-    g.setColour (theme::text); g.setFont (theme::font (15.0f, true));
-    g.drawText ("Band " + String (band + 1), r.getX() + 20, r.getY(), 120, 18, Justification::centredLeft);
+    g.setColour (c.withAlpha (0.55f)); g.drawRoundedRectangle (bounds, 8, 1.2f);
+    auto r = getLocalBounds().reduced (12, 8);
+    g.setColour (c); g.fillEllipse (Rectangle<float> ((float) r.getX(), (float) r.getY() + 3, 10, 10));
+    g.setColour (theme::text); g.setFont (theme::font (13.0f, true));
+    g.drawText ("Band " + String (band + 1), r.getX() + 16, r.getY(), 70, 16, Justification::centredLeft);
+    const auto s = proc.bandSettings (band);
+    g.setColour (theme::textDim); g.setFont (theme::font (11.0f));
+    String info = theme::noteName (s.freq);
     const float d = proc.dynamicDelta (band);
-    if (std::abs (d) > 0.05f)
-    {
-        g.setColour (theme::autoCol); g.setFont (theme::font (11.5f));
-        g.drawText ("dynamic " + String (d, 1) + " dB", r.getX() + 20, r.getY() + 20, 120, 14, Justification::centredLeft);
-    }
+    if (std::abs (d) > 0.05f) info << "   dyn " << String (d, 1) << " dB";
+    g.drawText (info, r.getX() + 84, r.getY(), 120, 16, Justification::centredLeft);
 }
 
 void BandPanel::resized()
 {
     auto r = getLocalBounds().reduced (12, 8);
-    r.removeFromLeft (130);
     auto col = r.removeFromLeft (150);
-    auto row = [&] (Label& l, ComboBox& c) { l.setBounds (col.removeFromTop (14)); c.setBounds (col.removeFromTop (22)); col.removeFromTop (4); };
-    row (typeL, type); row (slopeL, slope); row (placeL, place);
-    r.removeFromLeft (12);
-    for (auto* k : { &freq, &gain, &q }) k->setBounds (r.removeFromLeft (84));
-    r.removeFromLeft (16);
-    auto dcol = r.removeFromLeft (104);
-    dyn.setBounds (dcol.removeFromTop (24)); sc.setBounds (dcol.removeFromTop (24)); bypass.setBounds (dcol.removeFromTop (24));
-    dcol.removeFromTop (4); del.setBounds (dcol.removeFromTop (22));
-    for (auto* k : { &thr, &range }) k->setBounds (r.removeFromLeft (84));
+    col.removeFromTop (20);
+    for (auto* c : { &type, &slope, &place }) { c->setBounds (col.removeFromTop (22)); col.removeFromTop (3); }
+    r.removeFromLeft (8);
+    for (auto* k : { &freq, &gain, &q }) k->setBounds (r.removeFromLeft (72));
+    r.removeFromLeft (8);
+    auto dcol = r.removeFromLeft (100).withTrimmedTop (2);
+    dyn.setBounds (dcol.removeFromTop (22)); sc.setBounds (dcol.removeFromTop (22)); bypass.setBounds (dcol.removeFromTop (22));
+    dcol.removeFromTop (3); del.setBounds (dcol.removeFromTop (20));
+    r.removeFromLeft (4);
+    for (auto* k : { &thr, &range }) k->setBounds (r.removeFromLeft (72));
 }
 
 // ---------------------------------------------------------------- loudness panel

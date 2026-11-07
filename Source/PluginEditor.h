@@ -3,7 +3,7 @@
 #include "ui/EqDisplay.h"
 #include "ui/Panels.h"
 
-class PotatoEQEditor : public juce::AudioProcessorEditor
+class PotatoEQEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
     explicit PotatoEQEditor (PotatoEQProcessor&);
@@ -28,6 +28,7 @@ private:
     juce::TextButton anaMenu { "Analyzer..." }, presetBtn { "Presets" };
     void showPresetMenu();
     void showAnalyzerMenu();
+    void timerCallback() override;   // keeps the floating band panel next to its band
     std::unique_ptr<APVTS::ComboBoxAttachment> aPhase, aAnalyzer, aRange;
     std::unique_ptr<APVTS::SliderAttachment> aScale, aOut;
     std::unique_ptr<APVTS::ButtonAttachment> aAutoGain;

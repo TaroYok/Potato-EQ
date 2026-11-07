@@ -242,6 +242,22 @@ void EqDisplay::paint (Graphics& g)
         g.drawText ((d > 0 ? "+" : "") + String ((int) d), Rectangle<float> (a.getRight() + 2, y - 6, 24, 12), Justification::centredLeft);
     }
 
+    // note grid: every C, labelled just above the frequency scale
+    if (setting (ana::noteGrid, 1) != 0)
+    {
+        g.setFont (theme::font (9.5f));
+        for (int oct = 0; oct <= 9; ++oct)
+        {
+            const double f = 16.351597831287414 * std::pow (2.0, oct);   // C0 * 2^oct
+            if (f < kLoHz || f > kHiHz) continue;
+            const float x = xForFreq (f);
+            g.setColour (theme::accent.withAlpha (0.10f));
+            g.drawVerticalLine ((int) x, a.getY(), a.getBottom());
+            g.setColour (theme::accent.withAlpha (0.55f));
+            g.drawText ("C" + String (oct), Rectangle<float> (x + 2, a.getBottom() - 13, 24, 12), Justification::centredLeft);
+        }
+    }
+
     // spectrum
     const int mode = (int) proc.apvts.getRawParameterValue (params::id::analyzer)->load();
     const bool hold = setting (ana::peakHold, 0) != 0;
@@ -315,6 +331,9 @@ void EqDisplay::paint (Graphics& g)
         if (! s.active()) continue;
         const double dyn = linear ? 0.0 : proc.dynamicDelta (b);
         const auto& curve = bandCurve (b, s, s.gainDb * scale + dyn, cols);
+        for (int i = 0; i < cols; ++i) total[(size_t) i] += curve[(size_t) i];
+        // calm display: only the band you're working on shows its own shape
+        if (! (b == selected || b == hovered || b == dragging)) continue;
         Path p;
         const float zero = yForGain (0);
         p.startNewSubPath (a.getX(), zero);
@@ -322,17 +341,13 @@ void EqDisplay::paint (Graphics& g)
         {
             const float x = a.getX() + (float) i * 3;
             const double db = curve[(size_t) i];
-            total[(size_t) i] += db;
             p.lineTo (x, jlimit (a.getY() - 2, a.getBottom() + 2, yForGain (db)));
         }
         p.lineTo (a.getRight(), zero);
         const auto c = theme::bandColour (b);
-        if (b == selected || b == hovered || b == dragging)   // filling every band is costly on software renderers
-        {
-            g.setColour (c.withAlpha (0.22f));
-            g.fillPath (p);
-        }
-        g.setColour (c.withAlpha (b == selected ? 0.9f : 0.35f));
+        g.setColour (c.withAlpha (b == dragging || b == hovered ? 0.24f : 0.16f));
+        g.fillPath (p);
+        g.setColour (c.withAlpha (0.85f));
         g.strokePath (p, PathStrokeType (1.0f));
     }
     if (autoOn)
@@ -558,6 +573,7 @@ void EqDisplay::mouseExit (const MouseEvent&) { hovered = -1; mouseInside = fals
 void EqDisplay::mouseDown (const MouseEvent& e)
 {
     int h = hitNode (e.position);
+    if (h < 0 && ! hoverPeak.valid && e.mods.isLeftButtonDown() && e.getNumberOfClicks() == 1) setSelected (-1);   // click empty space: close the band panel
     if (h < 0 && hoverPeak.valid && e.mods.isLeftButtonDown() && ! e.mods.isAltDown())
     {   // spectrum grab: new narrow bell on the peak, drag up/down to set its gain
         h = addBand (arc::BandType::Bell, hoverPeak.freq, 0.0, 4.0);
