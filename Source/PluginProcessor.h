@@ -73,6 +73,13 @@ public:
     struct AutoSnapshot { arc::AutoResult result; float progress = 0; bool learning = false; };
     AutoSnapshot autoSnapshot() const;
     void startLearning();                 // (re)learn the incoming audio
+    int effectiveAutoMode() const;        // auto mode, or Off while Experimental tools are switched off
+    bool usingReference() const;          // profile is "Match a reference track"
+
+    // reference track (analysed on a background thread; saved with the project)
+    void loadReference (const juce::File&);
+    juce::String referenceStatus() const;
+    bool referenceReady() const { return refValid.load(); }
     int commitAutoToBands();              // copies the auto curve into editable bands, returns bands used
     float autoGainDb() const { return autoGainNow.load(); }
 
@@ -101,7 +108,7 @@ private:
     std::vector<float> monoScratch;
 
     // learning (audio thread fills, background thread reads)
-    static constexpr int kLearnOrder = 13, kLearnSize = 1 << kLearnOrder, kLearnHop = kLearnSize / 2;
+    static constexpr int kLearnOrder = 14, kLearnSize = 1 << kLearnOrder, kLearnHop = kLearnSize / 2;   // 2.9 Hz bins at 48 kHz
     juce::dsp::FFT learnFft { kLearnOrder };
     std::vector<float> learnIn[2], learnWork, learnWindow;
     int learnPos = 0;
@@ -111,7 +118,8 @@ private:
     std::atomic<bool> learnResetRequest { false }, learnDone { false };
     std::atomic<float> learnProgress { 0 };
     double learnFramesNeeded = 100;
-    std::vector<std::pair<int, int>> binMap;   // FFT bin range for each analysis band
+    std::vector<std::pair<double, double>> binEdges;   // fractional FFT-bin edges of each analysis band
+    std::vector<double> learnCum;                       // prefix sums of bin power
 
     // auto result (background -> audio/editor)
     mutable juce::SpinLock resultLock;
@@ -122,6 +130,7 @@ private:
     std::atomic<bool> scActive { false };
     arc::Limiter limiter;
     std::atomic<float>* pAutoLevel {}; std::atomic<float>* pLimiter {}; std::atomic<float>* pCeiling {}; std::atomic<float>* pCustom {};
+    std::atomic<float>* pExperimental {};
     std::atomic<float>* pMaxBoost {}; std::atomic<float>* pMaxCut {}; std::atomic<float>* pTilt {}; std::atomic<float>* pBass {}; std::atomic<float>* pSmooth {};
     arc::AutoTweaks readTweaks() const;
     void updateLatency();
@@ -135,6 +144,13 @@ private:
     std::atomic<bool> meterResetRequest { false };
     int lastMode = -1;
     int currentPreset = 0;
+    mutable juce::SpinLock refLock;
+    std::array<double, arc::kSpecBins> refPower {};
+    juce::String refName, refMessage;
+    std::atomic<bool> refValid { false }, refLoading { false };
+    std::atomic<int> refVersion { 0 };
+    int lastRefVersion = -1;
+    void analyseReference (juce::File);
     float levelTrim = 0;
     double lastTweakHash = -1;
 

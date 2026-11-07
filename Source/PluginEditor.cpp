@@ -20,16 +20,20 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
     for (auto* sl : { &scale, &out })
     {
         sl->setSliderStyle (Slider::LinearHorizontal);
-        sl->setTextBoxStyle (Slider::TextBoxRight, false, 64, 18);
+        sl->setTextBoxStyle (Slider::TextBoxRight, false, 52, 18);
         sl->setColour (Slider::trackColourId, theme::accent);
         addAndMakeVisible (*sl);
     }
     aScale = std::make_unique<APVTS::SliderAttachment> (s, params::id::gainScale, scale);
     aOut = std::make_unique<APVTS::SliderAttachment> (s, params::id::outGain, out);
     scale.setTooltip ("Scales the gain of every band (100% = as drawn).");
-    scaleL.setText ("Gain scale", dontSendNotification); outL.setText ("Output", dontSendNotification);
+    scaleL.setText ("Scale", dontSendNotification); outL.setText ("Out", dontSendNotification);
     for (auto* l : { &scaleL, &outL }) { l->setColour (Label::textColourId, theme::textDim); l->setJustificationType (Justification::centredRight); addAndMakeVisible (*l); }
     aAutoGain = std::make_unique<APVTS::ButtonAttachment> (s, params::id::autoGain, autoGain);
+    aExperimental = std::make_unique<APVTS::ButtonAttachment> (s, params::id::experimental, experimental);
+    experimental.setTooltip ("Shows tools that are still being tuned, like the Auto EQ. While this is off they're hidden and do nothing.");
+    experimental.onStateChange = [this] { updateExperimental(); };
+    addAndMakeVisible (experimental);
     autoGain.setTooltip ("Keeps the perceived level steady while you EQ, so louder doesn't fool you into thinking better.");
 
     // analyzer extras: freeze is momentary (not saved), the rest is saved with the project
@@ -46,8 +50,7 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
                      (Component*) &freeze, (Component*) &anaMenu, (Component*) &presetBtn,
                      (Component*) &display, (Component*) &loudness, (Component*) &autoPanel })
         addAndMakeVisible (*c);
-    addChildComponent (bandPanel);   // floats over the display next to the selected band
-    startTimerHz (30);
+    addAndMakeVisible (bandPanel);   // fixed box under the display
 
     display.onSelectionChanged = [this] (int b) { bandPanel.setBand (b); };
     bandPanel.onDelete = [this] (int b)
@@ -58,27 +61,19 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
     };
 
     setResizable (true, true);
-    setResizeLimits (1240, 800, 2000, 1300);
+    setResizeLimits (1340, 800, 2000, 1300);
+    autoPanel.setVisible (experimental.getToggleState());
     setSize (1360, 860);
 }
 
-PotatoEQEditor::~PotatoEQEditor() { stopTimer(); setLookAndFeel (nullptr); }
-
-void PotatoEQEditor::timerCallback()
+void PotatoEQEditor::updateExperimental()
 {
-    const int b = display.getSelected();
-    const bool show = b >= 0 && proc.bandSettings (b).used && ! display.isDragging();
-    if (! show) { if (bandPanel.isVisible()) bandPanel.setVisible (false); return; }
-    const auto d = display.getBounds();
-    const auto node = display.bandNodePosition (b) + d.getPosition().toFloat();
-    const int w = jmin (BandPanel::kWidth, d.getWidth() - 8), h = BandPanel::kHeight;
-    int x = jlimit (d.getX() + 4, d.getRight() - w - 4, (int) node.x - w / 2);
-    int y = node.y < d.getCentreY() ? (int) node.y + 22 : (int) node.y - 22 - h;   // below the node in the top half, above it in the bottom half
-    y = jlimit (d.getY() + 4, d.getBottom() - h - 18, y);
-    const Rectangle<int> r (x, y, w, h);
-    if (bandPanel.getBounds() != r) bandPanel.setBounds (r);
-    if (! bandPanel.isVisible()) { bandPanel.setVisible (true); bandPanel.toFront (false); }
+    const bool on = experimental.getToggleState();
+    if (autoPanel.isVisible() != on) { autoPanel.setVisible (on); resized(); }
 }
+
+PotatoEQEditor::~PotatoEQEditor() { setLookAndFeel (nullptr); }
+
 
 void PotatoEQEditor::showAnalyzerMenu()
 {
@@ -164,22 +159,25 @@ void PotatoEQEditor::resized()
     auto r = getLocalBounds();
     auto top = r.removeFromTop (44).reduced (10, 9);
     top.removeFromLeft (128);
-    presetBtn.setBounds (top.removeFromLeft (150)); top.removeFromLeft (8);
+    presetBtn.setBounds (top.removeFromLeft (130)); top.removeFromLeft (8);
     phase.setBounds (top.removeFromLeft (118)); top.removeFromLeft (8);
     analyzer.setBounds (top.removeFromLeft (100)); top.removeFromLeft (6);
     anaMenu.setBounds (top.removeFromLeft (86)); top.removeFromLeft (6);
     freeze.setBounds (top.removeFromLeft (72)); top.removeFromLeft (8);
     range.setBounds (top.removeFromLeft (70)); top.removeFromLeft (10);
     autoGain.setBounds (top.removeFromLeft (96));
-    out.setBounds (top.removeFromRight (150)); outL.setBounds (top.removeFromRight (50));
+    experimental.setBounds (top.removeFromRight (140)); top.removeFromRight (10);
+    out.setBounds (top.removeFromRight (128)); outL.setBounds (top.removeFromRight (32));
     top.removeFromRight (6);
-    scale.setBounds (top.removeFromRight (150)); scaleL.setBounds (top.removeFromRight (70));
+    scale.setBounds (top.removeFromRight (128)); scaleL.setBounds (top.removeFromRight (40));
 
     r.reduce (10, 0); r.removeFromBottom (10);
     auto side = r.removeFromRight (290);
     r.removeFromRight (10);
-    loudness.setBounds (side.removeFromTop (440));
+    loudness.setBounds (autoPanel.isVisible() ? side.removeFromTop (440) : side);
     side.removeFromTop (10);
     autoPanel.setBounds (side);
+    bandPanel.setBounds (r.removeFromBottom (BandPanel::kHeight + 8));
+    r.removeFromBottom (8);
     display.setBounds (r);
 }

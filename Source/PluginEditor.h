@@ -3,7 +3,7 @@
 #include "ui/EqDisplay.h"
 #include "ui/Panels.h"
 
-class PotatoEQEditor : public juce::AudioProcessorEditor, private juce::Timer
+class PotatoEQEditor : public juce::AudioProcessorEditor
 {
 public:
     explicit PotatoEQEditor (PotatoEQProcessor&);
@@ -24,14 +24,14 @@ private:
     juce::ComboBox phase, analyzer, range;
     juce::Slider scale, out;
     juce::Label scaleL, outL;
-    juce::ToggleButton autoGain { "Auto gain" }, freeze { "Freeze" };
+    juce::ToggleButton autoGain { "Auto gain" }, freeze { "Freeze" }, experimental { "Experimental tools" };
+    void updateExperimental();
     juce::TextButton anaMenu { "Analyzer..." }, presetBtn { "Presets" };
     void showPresetMenu();
     void showAnalyzerMenu();
-    void timerCallback() override;   // keeps the floating band panel next to its band
     std::unique_ptr<APVTS::ComboBoxAttachment> aPhase, aAnalyzer, aRange;
     std::unique_ptr<APVTS::SliderAttachment> aScale, aOut;
-    std::unique_ptr<APVTS::ButtonAttachment> aAutoGain;
+    std::unique_ptr<APVTS::ButtonAttachment> aAutoGain, aExperimental;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PotatoEQEditor)
 };

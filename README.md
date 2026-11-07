@@ -1,7 +1,7 @@
 # Potato EQ
 
 A 24-band parametric EQ (VST3 / AU / standalone) with a built-in LUFS meter and an
-**Auto EQ** that listens to your audio and steers its tonal balance toward a
+**Auto EQ** (under the **Experimental tools** switch, top right. While that's off, the Auto EQ is hidden and does nothing) that listens to your audio and steers its tonal balance toward a
 genre or instrument target curve.
 
 ![Potato EQ](docs/screenshot.png)
@@ -57,10 +57,12 @@ Every push to `main` also builds the plugin; those builds are under **Actions �
 **Auto EQ**
 - Profiles for full mixes (Balanced, Hip-Hop/Trap, EDM, Dubstep/DnB, Pop, R&B, Rock, Lo-fi, Acoustic/Jazz)
   and sources (lead/backing vocals, kick, snare, drum bus, bass/808, guitars, keys, synth lead/pad)
+- **Match a reference track**: load a finished song (WAV/AIFF/FLAC/OGG/MP3) and steer toward *its* tonal balance
+  instead of a generic curve. The reference's spectrum is saved with your project
 - **Learn**: listens to ~12 s of non-silent audio, then holds the correction (saved with your project)
 - **Live**: keeps listening (about a 6 s memory) and glides the EQ as the song changes
 - Compares your long-term spectrum with the profile's target, smooths the difference to 1/3 octave,
-  limits it (mixes: +4 / −6 dB, sources: up to +6 / −9 dB), never boosts empty regions,
+  limits it (default +3 / −4 dB, adjustable), never boosts empty regions,
   and adds the profile's high-pass for sources
 - **Amount** 0–150 %, and **Turn into bands** converts the result into ordinary editable bands
 - Tweaks: **Brightness** (tilts the target ±3 dB/oct), **Low end** (±6 dB below ~120 Hz),

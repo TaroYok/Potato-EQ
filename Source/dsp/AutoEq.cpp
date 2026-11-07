@@ -50,6 +50,8 @@ static double targetAt (const Profile& p, double f)
     return 0;
 }
 
+double profileTargetDb (const Profile& p, double f) { return targetAt (p, f); }
+
 // weight 1 inside [lo, hi], fading to 0 over half an octave outside it
 static double rangeWeight (double f, double lo, double hi)
 {
@@ -82,7 +84,8 @@ static void solveAutoBells (const std::array<double, kSpecBins>& desired, AutoCu
     }
 }
 
-AutoResult computeAutoEq (const std::array<double, kSpecBins>& power, const Profile& p, double fs, const AutoTweaks& tw)
+AutoResult computeAutoEq (const std::array<double, kSpecBins>& power, const Profile& p, double fs, const AutoTweaks& tw,
+                          const std::array<double, kSpecBins>* targetPower)
 {
     AutoResult r;
     double peak = 0;
@@ -94,7 +97,8 @@ AutoResult computeAutoEq (const std::array<double, kSpecBins>& power, const Prof
     {
         r.measuredDb[(size_t) i] = 10.0 * std::log10 (std::max (power[(size_t) i], peak * 1e-12));
         const double f = specBinFreq (i);
-        r.targetDb[(size_t) i] = targetAt (p, f) + tw.tiltDbPerOct * std::log2 (f / 1000.0)
+        const double base = targetPower != nullptr ? 10.0 * std::log10 (std::max ((*targetPower)[(size_t) i], 1e-30)) : targetAt (p, f);
+        r.targetDb[(size_t) i] = base + tw.tiltDbPerOct * std::log2 (f / 1000.0)
                                + tw.bassDb / (1.0 + std::pow (f / 120.0, 4.0));
         has[(size_t) i] = power[(size_t) i] > peak * 1e-6 && specBinFreq (i) < fs * 0.45;   // within 60 dB of the loudest band
     }

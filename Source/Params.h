@@ -12,7 +12,7 @@ namespace id
                               analyzer = "analyzer", range = "displayRange", autoProfile = "autoProfile", autoMode = "autoMode",
                               autoAmount = "autoAmount", lufsTarget = "lufsTarget",
                               autoMaxBoost = "autoMaxBoost", autoMaxCut = "autoMaxCut", autoTilt = "autoTilt", autoBass = "autoBass",
-                              autoSmooth = "autoSmooth", autoLevel = "autoLevel", limiter = "limiter", ceiling = "ceiling", lufsCustom = "lufsCustom";
+                              autoSmooth = "autoSmooth", experimental = "experimental", autoLevel = "autoLevel", limiter = "limiter", ceiling = "ceiling", lufsCustom = "lufsCustom";
 }
 
 enum AutoMode { autoOff = 0, autoLearn, autoLive };
@@ -52,8 +52,11 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterChoice> (pid (id::analyzer), "Analyzer", StringArray { "Off", "Pre", "Post", "Pre + Post" }, 3));
     l.add (std::make_unique<AudioParameterChoice> (pid (id::range), "Display Range", StringArray { "3 dB", "6 dB", "12 dB", "30 dB" }, 2));
 
+    l.add (std::make_unique<AudioParameterBool> (pid (id::experimental), "Experimental Tools", false,
+                                                 AudioParameterBoolAttributes().withAutomatable (false)));
     StringArray profNames;
     for (auto& p : arc::profiles()) profNames.add (p.name);
+    profNames.add ("Match a reference track");
     l.add (std::make_unique<AudioParameterChoice> (pid (id::autoProfile), "Auto EQ Profile", profNames, 0));
     l.add (std::make_unique<AudioParameterChoice> (pid (id::autoMode), "Auto EQ Mode", StringArray { "Off", "Learn", "Live" }, 0));
     l.add (std::make_unique<AudioParameterFloat> (pid (id::autoAmount), "Auto EQ Amount", NormalisableRange<float> (0.f, 150.f, 0.1f), 100.f,
@@ -62,8 +65,8 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     for (auto& t : lufsTargets()) targets.add (t.name);
     l.add (std::make_unique<AudioParameterChoice> (pid (id::lufsTarget), "Loudness Target", targets, 0));
 
-    l.add (std::make_unique<AudioParameterFloat> (pid (id::autoMaxBoost), "Auto EQ Max Boost", NormalisableRange<float> (0.f, 12.f, 0.1f), 5.f, dbAttr));
-    l.add (std::make_unique<AudioParameterFloat> (pid (id::autoMaxCut), "Auto EQ Max Cut", NormalisableRange<float> (0.f, 12.f, 0.1f), 8.f, dbAttr));
+    l.add (std::make_unique<AudioParameterFloat> (pid (id::autoMaxBoost), "Auto EQ Max Boost", NormalisableRange<float> (0.f, 12.f, 0.1f), 3.f, dbAttr));
+    l.add (std::make_unique<AudioParameterFloat> (pid (id::autoMaxCut), "Auto EQ Max Cut", NormalisableRange<float> (0.f, 12.f, 0.1f), 4.f, dbAttr));
     l.add (std::make_unique<AudioParameterFloat> (pid (id::autoTilt), "Auto EQ Brightness", NormalisableRange<float> (-3.f, 3.f, 0.05f), 0.f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return (v > 0 ? "+" : "") + String (v, 1) + " dB/oct"; })));
     l.add (std::make_unique<AudioParameterFloat> (pid (id::autoBass), "Auto EQ Low End", NormalisableRange<float> (-6.f, 6.f, 0.1f), 0.f, dbAttr));

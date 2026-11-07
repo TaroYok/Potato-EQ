@@ -63,7 +63,8 @@ target_compile_definitions(PotatoEQ PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_DISPLAY_SPLASH_SCREEN=0)
+    JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_USE_MP3AUDIOFORMAT=1)
 
 if (POTATO_HEADLESS_LINUX)
     target_compile_definitions(PotatoEQ PUBLIC
@@ -111,7 +112,7 @@ if (POTATO_BUILD_HARNESS)
         Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/ui/EqDisplay.cpp Source/ui/Panels.cpp)
     target_include_directories(potato_harness PRIVATE Source)
     target_compile_definitions(potato_harness PRIVATE
-        JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1
+        JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_USE_MP3AUDIOFORMAT=1
         JUCE_USE_XRANDR=0 JUCE_USE_XINERAMA=0 JUCE_USE_XCURSOR=0 JUCE_USE_XINPUT=0 JUCE_USE_XRENDER=0 JUCE_USE_XSHM=0 JUCE_ALSA=0 JUCE_JACK=0)
     target_link_libraries(potato_harness PRIVATE potato_dsp juce::juce_audio_utils juce::juce_dsp
         juce::juce_recommended_config_flags)

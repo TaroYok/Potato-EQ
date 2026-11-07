@@ -122,7 +122,7 @@ BandPanel::BandPanel (PotatoEQProcessor& p) : proc (p)
         l->setJustificationType (Justification::centredLeft);   // compact floating panel: combos speak for themselves
     }
     type.setTooltip ("Band shape"); slope.setTooltip ("Slope (cuts and shelves)"); place.setTooltip ("Stereo placement");
-    shadow.setOwner (this);
+
     typeL.setText ("SHAPE", dontSendNotification); slopeL.setText ("SLOPE", dontSendNotification); placeL.setText ("STEREO", dontSendNotification);
     for (auto* c : { &type, &slope, &place }) addAndMakeVisible (*c);
     for (auto* k : { &freq, &gain, &q, &thr, &range }) addAndMakeVisible (*k);
@@ -182,10 +182,16 @@ void BandPanel::timerCallback()
 void BandPanel::paint (Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
-    g.setColour (theme::panel.withAlpha (0.97f)); g.fillRoundedRectangle (bounds, 8);
-    if (band < 0) return;
+    g.setColour (theme::panel); g.fillRoundedRectangle (bounds, 6);
+    if (band < 0)
+    {
+        g.setColour (theme::textDim); g.setFont (theme::font (13.0f));
+        g.drawText ("Click a band to edit it here.  Double-click the display to add one, or drag a peak in the analyzer.",
+                    getLocalBounds(), Justification::centred);
+        return;
+    }
     const auto c = theme::bandColour (band);
-    g.setColour (c.withAlpha (0.55f)); g.drawRoundedRectangle (bounds, 8, 1.2f);
+    g.setColour (c.withAlpha (0.45f)); g.drawRoundedRectangle (bounds, 6, 1.0f);
     auto r = getLocalBounds().reduced (12, 8);
     g.setColour (c); g.fillEllipse (Rectangle<float> ((float) r.getX(), (float) r.getY() + 3, 10, 10));
     g.setColour (theme::text); g.setFont (theme::font (13.0f, true));
@@ -378,6 +384,17 @@ AutoPanel::AutoPanel (PotatoEQProcessor& p) : proc (p)
     mode.setTooltip ("Learn: listens for ~12 s of audio, then holds the EQ.  Live: keeps listening and adapts as the song changes.");
     commit.setTooltip ("Copies the auto EQ into regular bands you can tweak, then switches the auto EQ off.");
     relearn.onClick = [this] { proc.startLearning(); status = "Listening..."; };
+    addChildComponent (loadRef);
+    loadRef.setTooltip ("Pick a finished song you like (WAV, AIFF, FLAC, OGG or MP3). The Auto EQ steers your track toward its tonal balance.");
+    loadRef.onClick = [this]
+    {
+        chooser = std::make_unique<FileChooser> ("Choose a reference track", File(), "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this] (const FileChooser& fc)
+        {
+            const auto f = fc.getResult();
+            if (f.existsAsFile()) { proc.loadReference (f); status = {}; }
+        });
+    };
     commit.onClick = [this]
     {
         const int n = proc.commitAutoToBands();
@@ -391,6 +408,8 @@ AutoPanel::~AutoPanel() { stopTimer(); }
 void AutoPanel::timerCallback()
 {
     snap = proc.autoSnapshot();
+    if (proc.usingReference() != refShown) { refShown = proc.usingReference(); loadRef.setVisible (refShown); resized(); }
+    if (refShown) status = proc.referenceStatus();
     const int m = mode.getSelectedId() - 1;
     relearn.setEnabled (m != params::autoOff);
     commit.setEnabled (m != params::autoOff && snap.result.valid);
@@ -477,7 +496,9 @@ void AutoPanel::resized()
 {
     auto r = getLocalBounds().reduced (12, 10);
     r.removeFromTop (18);
-    profile.setBounds (r.removeFromTop (24)); r.removeFromTop (6);
+    auto prow = r.removeFromTop (24);
+    if (refShown) { loadRef.setBounds (prow.removeFromRight (104)); prow.removeFromRight (6); }
+    profile.setBounds (prow); r.removeFromTop (6);
     auto row = r.removeFromTop (24);
     mode.setBounds (row.removeFromLeft (row.getWidth() / 2 - 3)); row.removeFromLeft (6); relearn.setBounds (row);
     r.removeFromTop (6);

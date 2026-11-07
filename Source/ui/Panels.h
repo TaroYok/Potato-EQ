@@ -33,7 +33,7 @@ void fillCombo (juce::ComboBox&, APVTS&, const juce::String& paramId);
 class BandPanel : public juce::Component, private juce::Timer
 {
 public:
-    static constexpr int kWidth = 650, kHeight = 104;
+    static constexpr int kHeight = 104;
     BandPanel (PotatoEQProcessor&);
     ~BandPanel() override;
     void setBand (int b);
@@ -50,7 +50,6 @@ private:
     Knob freq { "FREQUENCY" }, gain { "GAIN" }, q { "Q" }, thr { "THRESHOLD" }, range { "RANGE" };
     juce::ToggleButton dyn { "Dynamic" }, bypass { "Bypass" }, sc { "Sidechain" };
     juce::TextButton del { "Delete" };
-    juce::DropShadower shadow { juce::DropShadow (juce::Colours::black.withAlpha (0.55f), 18, { 0, 6 }) };
     std::unique_ptr<APVTS::ComboBoxAttachment> aType, aSlope, aPlace;
     std::unique_ptr<APVTS::SliderAttachment> aFreq, aGain, aQ, aThr, aRange;
     std::unique_ptr<APVTS::ButtonAttachment> aDyn, aBypass, aSc;
@@ -95,7 +94,9 @@ private:
     PotatoEQProcessor& proc;
     juce::ComboBox profile, mode;
     juce::Slider amount;
-    juce::TextButton relearn { "Re-learn" }, commit { "Turn into bands" };
+    juce::TextButton relearn { "Re-learn" }, commit { "Turn into bands" }, loadRef { "Load track..." };
+    std::unique_ptr<juce::FileChooser> chooser;
+    bool refShown = false;
     std::unique_ptr<APVTS::ComboBoxAttachment> aProfile, aMode, aSmooth;
     std::unique_ptr<APVTS::SliderAttachment> aAmount, aTilt, aBass, aBoost, aCut;
     juce::Slider tilt, bass, boost, cut;

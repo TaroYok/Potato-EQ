@@ -3,6 +3,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Presets.h"
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <cstdio>
 
 using namespace juce;
@@ -88,6 +89,7 @@ int main (int argc, char** argv)
     p->setParam (params::id::phaseMode, 0.0f);
 
     std::puts ("-- auto EQ learn --");
+    p->setParam (params::id::experimental, 1.0f);
     p->setParam (params::id::autoProfile, 1.0f);   // hip-hop
     p->setParam (params::id::autoMode, (float) params::autoLearn);
     Random rng (42);
@@ -106,6 +108,108 @@ int main (int argc, char** argv)
     check (maxAbs > 0.5 && maxAbs <= 12.0, "auto bells within limits (max |dB|)", maxAbs, 6);
     const double lowCorr = arc::autoCurveDb (snap.result.curve, 1.0, 60, 48000);
     check (lowCorr > 0.5, "pink noise vs hip-hop target -> boosts the low end", lowCorr, 3);
+
+    // ~22 s of noise whose spectrum follows a profile's target exactly
+    auto makeShaped = [] (int prof, int seed)
+    {
+        const auto& P = arc::profiles()[(size_t) prof];
+        const int order = 20, N = 1 << order;
+        dsp::FFT big (order);
+        std::vector<dsp::Complex<float>> spec ((size_t) N), sig ((size_t) N);
+        Random r2 (seed);
+        for (int k = 1; k < N / 2; ++k)
+        {
+            const double f = k * 48000.0 / N;
+            // octave-band energy (pink = flat) -> power density per Hz ~ 10^(T/10) / f
+            const double dens = f < 15 ? 0.0 : std::pow (10.0, arc::profileTargetDb (P, f) / 10.0) / f;
+            const double ph = r2.nextDouble() * MathConstants<double>::twoPi, mag = std::sqrt (dens);
+            spec[(size_t) k] = { (float) (mag * std::cos (ph)), (float) (mag * std::sin (ph)) };
+            spec[(size_t) (N - k)] = std::conj (spec[(size_t) k]);
+        }
+        big.perform (spec.data(), sig.data(), true);
+        std::vector<float> out ((size_t) N);
+        double ms = 0; for (auto& v : sig) ms += (double) v.real() * v.real(); ms /= N;
+        const float g = (float) (0.1 / std::sqrt (ms));   // -20 dBFS RMS
+        for (int n = 0; n < N; ++n) out[(size_t) n] = sig[(size_t) n].real() * g;
+        return out;
+    };
+    // runs a learn pass of `audio` through a fresh processor and returns the learned result
+    auto learnWith = [&] (const std::vector<float>& audio, std::function<void (PotatoEQProcessor&)> setup)
+    {
+        auto pt = std::make_unique<PotatoEQProcessor>();
+        pt->setPlayConfigDetails (2, 2, 48000, 512);
+        pt->prepareToPlay (48000, 512);
+        pt->setParam (params::id::experimental, 1.0f);
+        setup (*pt);
+        pt->setParam (params::id::autoMode, (float) params::autoLearn);
+        Thread::sleep (150);
+        int pos = 0;
+        auto runSig = [&] (double secs) { run (*pt, secs, [&] (int) { const float v = audio[(size_t) (pos++ % (int) audio.size())]; return std::make_pair (v, v); }); };
+        runSig (15.0);
+        for (int i = 0; i < 80 && ! pt->autoSnapshot().result.valid; ++i) { Thread::sleep (50); runSig (0.05); }
+        return pt->autoSnapshot().result;
+    };
+    auto worstDb = [] (const arc::AutoResult& res, double& worstF)
+    {
+        double worst = 0;
+        for (int i = 0; i < arc::kSpecBins; ++i)
+        {
+            const double f = arc::specBinFreq (i), c = arc::autoCurveDb (res.curve, 1.0, f, 48000);
+            if (f >= 30 && f <= 16000 && std::abs (c) > worst) { worst = std::abs (c); worstF = f; }
+        }
+        return worst;
+    };
+
+    std::puts ("-- auto EQ accuracy: audio that already matches the target should barely be touched --");
+    for (int prof : { 1, 0, 2 })   // hip-hop, balanced, EDM
+    {
+        const auto res = learnWith (makeShaped (prof, 7 + prof), [prof] (PotatoEQProcessor& x) { x.setParam (params::id::autoProfile, (float) prof); });
+        double wf = 0; const double worst = worstDb (res, wf);
+        std::printf ("      %-22s EQ at 40 Hz %+.2f  60 Hz %+.2f  1 kHz %+.2f  10 kHz %+.2f dB  (worst %.2f dB at %.0f Hz)\n",
+                     arc::profiles()[(size_t) prof].name.c_str(), arc::autoCurveDb (res.curve, 1, 40, 48000), arc::autoCurveDb (res.curve, 1, 60, 48000),
+                     arc::autoCurveDb (res.curve, 1, 1000, 48000), arc::autoCurveDb (res.curve, 1, 10000, 48000), worst, wf);
+        check (res.valid && worst < 1.0, String (arc::profiles()[(size_t) prof].name) + ": on-target audio left alone (worst dB)", worst, 1.0);
+    }
+
+    std::puts ("-- reference track matching --");
+    {
+        const auto hiphop = makeShaped (1, 101), balanced = makeShaped (0, 202);
+        const File wav = File::getSpecialLocation (File::tempDirectory).getChildFile ("potato_reference_test.wav");
+        wav.deleteFile();
+        {
+            std::unique_ptr<OutputStream> os (wav.createOutputStream());
+            WavAudioFormat fmt;
+            auto w = fmt.createWriterFor (os, AudioFormatWriterOptions{}.withSampleRate (48000).withNumChannels (2).withBitsPerSample (24));
+            AudioBuffer<float> b (2, (int) hiphop.size());
+            for (int c = 0; c < 2; ++c) b.copyFrom (c, 0, hiphop.data(), (int) hiphop.size());
+            w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+        }
+        const int refIndex = (int) arc::profiles().size();
+        auto useRef = [&] (PotatoEQProcessor& x)
+        {
+            x.setParam (params::id::autoProfile, (float) refIndex);
+            x.loadReference (wav);
+            for (int i = 0; i < 200 && ! x.referenceReady(); ++i) Thread::sleep (50);
+        };
+        auto same = learnWith (hiphop, useRef);
+        double wf = 0; const double w1 = worstDb (same, wf);
+        check (same.valid && w1 < 1.0, "song matching its own reference is left alone (worst dB)", w1, 1.0);
+        auto diff = learnWith (balanced, useRef);
+        const double at60 = arc::autoCurveDb (diff.curve, 1, 60, 48000), at1k = arc::autoCurveDb (diff.curve, 1, 1000, 48000);
+        std::printf ("      balanced mix vs hip-hop reference: %+.2f dB at 60 Hz, %+.2f dB at 1 kHz\n", at60, at1k);
+        check (diff.valid && at60 > 1.5 && std::abs (at1k) < 1.0, "steers a lighter mix toward the reference's low end", at60, 3);
+        wav.deleteFile();
+    }
+
+    std::puts ("-- experimental tools switch --");
+    {
+        auto pe = std::make_unique<PotatoEQProcessor>();
+        pe->setPlayConfigDetails (2, 2, 48000, 512);
+        pe->prepareToPlay (48000, 512);
+        pe->setParam (params::id::autoMode, (float) params::autoLive);   // experimental tools are OFF by default
+        const double g = sineGainDb (*pe, 1000, 0);
+        check (pe->effectiveAutoMode() == params::autoOff && std::abs (g) < 0.01, "with Experimental tools off, Auto EQ does nothing", g, 0);
+    }
 
     std::puts ("-- loudness --");
     p->resetMeter();
@@ -160,6 +264,7 @@ int main (int argc, char** argv)
             pc->setParam (params::bandId (b, "dyn"), b % 3 == 0 ? 1.0f : 0.0f);
             pc->setParam (params::bandId (b, "used"), 1.0f);
         }
+        pc->setParam (params::id::experimental, 1.0f);
         pc->setParam (params::id::autoMode, (float) params::autoLive);
         pc->setParam (params::id::limiter, 1.0f);
         pc->setParam (params::id::autoLevel, 1.0f);

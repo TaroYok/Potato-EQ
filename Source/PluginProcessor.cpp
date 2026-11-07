@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Presets.h"
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <cstring>
 
 using namespace juce;
@@ -25,6 +26,7 @@ PotatoEQProcessor::PotatoEQProcessor()
     pLimiter = apvts.getRawParameterValue (params::id::limiter);
     pCeiling = apvts.getRawParameterValue (params::id::ceiling);
     pCustom = apvts.getRawParameterValue (params::id::lufsCustom);
+    pExperimental = apvts.getRawParameterValue (params::id::experimental);
     pMaxBoost = apvts.getRawParameterValue (params::id::autoMaxBoost);
     pMaxCut = apvts.getRawParameterValue (params::id::autoMaxCut);
     pTilt = apvts.getRawParameterValue (params::id::autoTilt);
@@ -66,14 +68,15 @@ void PotatoEQProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     for (int i = 0; i < kLearnSize; ++i) learnWindow[(size_t) i] = 0.5f - 0.5f * std::cos (MathConstants<float>::twoPi * (float) i / kLearnSize);
     learnPos = 0;
     learnFramesNeeded = 12.0 * sampleRate / kLearnHop;   // ~12 s of non-silent audio
-    binMap.clear();
+    // band edges in (fractional) FFT bins; band energy is integrated exactly over the band,
+    // so narrow low-frequency bands aren't over-measured by whole bins
+    binEdges.clear();
     for (int i = 0; i < arc::kSpecBins; ++i)
     {
         const double binHz = sampleRate / kLearnSize;
-        int lo = (int) std::ceil (arc::specBinLo (i) / binHz), hi = (int) std::floor (arc::specBinHi (i) / binHz);
-        if (hi < lo) lo = hi = (int) std::lround (arc::specBinFreq (i) / binHz);
-        binMap.emplace_back (jlimit (1, kLearnSize / 2, lo), jlimit (1, kLearnSize / 2, hi));
+        binEdges.emplace_back (arc::specBinLo (i) / binHz, arc::specBinHi (i) / binHz);
     }
+    learnCum.assign ((size_t) kLearnSize / 2 + 2, 0.0);
 
     // linear phase
     int mult = 1;
@@ -148,7 +151,7 @@ void PotatoEQProcessor::processBlock (AudioBuffer<float>& fullBuffer, MidiBuffer
     };
     pushMono (preFifo);
 
-    const int autoMode = (int) pAutoMode->load();
+    const int autoMode = effectiveAutoMode();
     if (autoMode != params::autoOff) analyseForLearning (buffer, n);
 
     {
@@ -255,12 +258,19 @@ void PotatoEQProcessor::analyseForLearning (const AudioBuffer<float>& buffer, in
             for (int i = 0; i < kLearnSize; ++i) { const float x = learnIn[c][(size_t) i]; ms += (double) x * x; learnWork[(size_t) i] = x * learnWindow[(size_t) i]; }
             std::fill (learnWork.begin() + kLearnSize, learnWork.end(), 0.0f);
             learnFft.performFrequencyOnlyForwardTransform (learnWork.data(), true);
-            for (int b = 0; b < arc::kSpecBins; ++b)
+            // prefix sums of power (bin k covers [k-0.5, k+0.5]); skip DC
+            const int nb = kLearnSize / 2 + 1;
+            learnCum[0] = 0.0;
+            for (int k = 0; k < nb; ++k)
+                learnCum[(size_t) k + 1] = learnCum[(size_t) k] + (k < 1 ? 0.0 : (double) learnWork[(size_t) k] * learnWork[(size_t) k]);
+            auto upTo = [&] (double x)
             {
-                double p = 0;
-                for (int j = binMap[(size_t) b].first; j <= binMap[(size_t) b].second; ++j) p += (double) learnWork[(size_t) j] * learnWork[(size_t) j];
-                frame[(size_t) b] += p;
-            }
+                const double p = jlimit (0.0, (double) nb, x + 0.5);
+                const int i = jmin (nb - 1, (int) p);
+                return learnCum[(size_t) i] + (p - i) * (learnCum[(size_t) i + 1] - learnCum[(size_t) i]);
+            };
+            for (int b = 0; b < arc::kSpecBins; ++b)
+                frame[(size_t) b] += upTo (binEdges[(size_t) b].second) - upTo (binEdges[(size_t) b].first);
         }
         ms /= (double) (kLearnSize * numCh);
         for (int c = 0; c < 2; ++c) std::copy (learnIn[c].begin() + kLearnHop, learnIn[c].end(), learnIn[c].begin());
@@ -271,7 +281,7 @@ void PotatoEQProcessor::analyseForLearning (const AudioBuffer<float>& buffer, in
         if (learnResetRequest.exchange (false)) { learnAccum.fill (0); learnFrames = 0; learnDone = false; }
         if (ms < 1e-6) continue;   // ignore silence (< -60 dBFS)
 
-        if ((int) pAutoMode->load() == params::autoLive)
+        if (effectiveAutoMode() == params::autoLive)
         {
             const double decay = std::exp (-kLearnHop / (fs.load() * 6.0));   // ~6 s memory
             for (int b = 0; b < arc::kSpecBins; ++b) learnAccum[(size_t) b] = learnAccum[(size_t) b] * decay + frame[(size_t) b];
@@ -286,6 +296,89 @@ void PotatoEQProcessor::analyseForLearning (const AudioBuffer<float>& buffer, in
             if (learnFrames >= learnFramesNeeded) learnDone = true;
         }
     }
+}
+
+int PotatoEQProcessor::effectiveAutoMode() const
+{
+    return pExperimental->load() > 0.5f ? (int) pAutoMode->load() : (int) params::autoOff;
+}
+
+bool PotatoEQProcessor::usingReference() const
+{
+    return (int) pProfile->load() >= (int) arc::profiles().size();
+}
+
+String PotatoEQProcessor::referenceStatus() const
+{
+    const SpinLock::ScopedLockType lock (refLock);
+    if (refLoading.load()) return "Analysing " + refName + " ...";
+    if (refMessage.isNotEmpty()) return refMessage;
+    return refValid.load() ? "Reference: " + refName : String ("No reference loaded");
+}
+
+void PotatoEQProcessor::loadReference (const File& f)
+{
+    if (refLoading.exchange (true)) return;
+    { const SpinLock::ScopedLockType lock (refLock); refName = f.getFileName(); refMessage = {}; }
+    Thread::launch ([this, f] { analyseReference (f); });
+}
+
+// Measures a song's long-term spectrum exactly the way the incoming audio is measured.
+void PotatoEQProcessor::analyseReference (File f)
+{
+    AudioFormatManager fm;
+    fm.registerBasicFormats();
+    std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (f));
+    std::array<double, arc::kSpecBins> acc {};
+    double frames = 0;
+    String msg;
+    if (reader == nullptr || reader->sampleRate <= 0) msg = "Couldn't read " + f.getFileName() + " (use WAV, AIFF, FLAC, OGG or MP3)";
+    else
+    {
+        const double sr = reader->sampleRate;
+        const int N = kLearnSize, hop = kLearnHop, nb = N / 2 + 1;
+        const int numCh = jlimit (1, 2, (int) reader->numChannels);
+        dsp::FFT fft (kLearnOrder);
+        std::vector<float> win ((size_t) N), work ((size_t) 2 * N);
+        for (int i = 0; i < N; ++i) win[(size_t) i] = 0.5f - 0.5f * std::cos (MathConstants<float>::twoPi * (float) i / N);
+        std::vector<double> cum ((size_t) nb + 1, 0.0);
+        AudioBuffer<float> buf (numCh, N);
+        const int64 total = jmin (reader->lengthInSamples, (int64) (sr * 900));   // first 15 minutes at most
+        for (int64 pos = 0; pos + N <= total; pos += hop)
+        {
+            reader->read (&buf, 0, N, pos, true, numCh > 1);
+            double ms = 0;
+            std::array<double, arc::kSpecBins> frame {};
+            for (int c = 0; c < numCh; ++c)
+            {
+                const float* x = buf.getReadPointer (c);
+                for (int i = 0; i < N; ++i) { ms += (double) x[i] * x[i]; work[(size_t) i] = x[i] * win[(size_t) i]; }
+                std::fill (work.begin() + N, work.end(), 0.0f);
+                fft.performFrequencyOnlyForwardTransform (work.data(), true);
+                cum[0] = 0;
+                for (int k = 0; k < nb; ++k) cum[(size_t) k + 1] = cum[(size_t) k] + (k < 1 ? 0.0 : (double) work[(size_t) k] * work[(size_t) k]);
+                auto upTo = [&] (double xb)
+                {
+                    const double p = jlimit (0.0, (double) nb, xb + 0.5);
+                    const int i = jmin (nb - 1, (int) p);
+                    return cum[(size_t) i] + (p - i) * (cum[(size_t) i + 1] - cum[(size_t) i]);
+                };
+                const double binHz = sr / N;
+                for (int b = 0; b < arc::kSpecBins; ++b)
+                    frame[(size_t) b] += upTo (arc::specBinHi (b) / binHz) - upTo (arc::specBinLo (b) / binHz);
+            }
+            if (ms / (N * numCh) < 1e-6) continue;   // skip silence
+            for (int b = 0; b < arc::kSpecBins; ++b) acc[(size_t) b] += frame[(size_t) b];
+            frames += 1;
+        }
+        if (frames < 20) msg = f.getFileName() + " is too short or silent";
+    }
+    {
+        const SpinLock::ScopedLockType lock (refLock);
+        refMessage = msg;
+        if (msg.isEmpty()) { refPower = acc; refValid = true; ++refVersion; }
+    }
+    refLoading = false;
 }
 
 void PotatoEQProcessor::startLearning()
@@ -304,7 +397,7 @@ PotatoEQProcessor::AutoSnapshot PotatoEQProcessor::autoSnapshot() const
     AutoSnapshot s;
     { const SpinLock::ScopedLockType lock (resultLock); s.result = autoResult; }
     s.progress = learnProgress.load();
-    s.learning = (int) pAutoMode->load() == params::autoLearn && ! learnDone.load();
+    s.learning = effectiveAutoMode() == params::autoLearn && ! learnDone.load();
     return s;
 }
 
@@ -332,8 +425,10 @@ void PotatoEQProcessor::run()
     while (! threadShouldExit())
     {
         wait (60);
-        const int autoMode = (int) pAutoMode->load();
-        const int profile = jlimit (0, (int) arc::profiles().size() - 1, (int) pProfile->load());
+        const int autoMode = effectiveAutoMode();
+        const bool useRef = usingReference();
+        const int profile = useRef ? (int) arc::profiles().size() : jlimit (0, (int) arc::profiles().size() - 1, (int) pProfile->load());
+        const int refVer = refVersion.load();
 
         if (autoMode != lastAutoMode)
         {
@@ -350,6 +445,14 @@ void PotatoEQProcessor::run()
         if (autoMode == params::autoLearn && learnDone.load() && (profile != lastProfile || ! autoSnapshot().result.valid)) compute = true;
         if (autoMode == params::autoLive && Time::currentTimeMillis() - lastLive > 500) { compute = true; lastLive = Time::currentTimeMillis(); }
         if (autoMode != params::autoOff && autoMode == params::autoLearn && profile != lastProfile && learnDone.load()) compute = true;
+        if (useRef && refVer != lastRefVersion && learnDone.load() && autoMode == params::autoLearn) compute = true;
+        if (useRef && ! refValid.load())
+        {   // no reference loaded yet: nothing to steer toward
+            compute = false;
+            const SpinLock::ScopedLockType lock (resultLock);
+            if (autoResult.valid) { autoResult = {}; autoResultFresh = true; }
+            lastProfile = profile;
+        }
 
         if (compute)
         {
@@ -358,7 +461,12 @@ void PotatoEQProcessor::run()
             { const SpinLock::ScopedLockType lock (learnLock); acc = learnAccum; frames = learnFrames; }
             if (frames >= 3)
             {
-                auto r = arc::computeAutoEq (acc, arc::profiles()[(size_t) profile], fs.load(), tw);
+                std::array<double, arc::kSpecBins> ref {};
+                if (useRef) { const SpinLock::ScopedLockType lock (refLock); ref = refPower; }
+                arc::Profile refProfile; refProfile.name = "Reference"; refProfile.fitLo = 30; refProfile.fitHi = 16000;
+                auto r = useRef ? arc::computeAutoEq (acc, refProfile, fs.load(), tw, &ref)
+                                : arc::computeAutoEq (acc, arc::profiles()[(size_t) profile], fs.load(), tw);
+                lastRefVersion = refVer;
                 if (r.valid)
                 {
                     const SpinLock::ScopedLockType lock (resultLock);
@@ -393,7 +501,7 @@ void PotatoEQProcessor::buildLinearPhase()
 {
     const int N = firSize;
     const double sr = fs.load(), scale = pScale->load() / 100.0;
-    const int autoMode = (int) pAutoMode->load();
+    const int autoMode = effectiveAutoMode();
     const double amount = autoMode != params::autoOff ? pAmount->load() / 100.0 : 0.0;
     arc::AutoCurve curve;
     { const SpinLock::ScopedLockType lock (resultLock); curve = autoResult.curve; }
@@ -583,6 +691,19 @@ void PotatoEQProcessor::getStateInformation (MemoryBlock& dest)
     }
     state.removeChild (state.getChildWithName ("Learned"), nullptr);
     state.appendChild (learn, nullptr);
+    ValueTree ref ("Reference");
+    {
+        const SpinLock::ScopedLockType lock (refLock);
+        if (refValid.load())
+        {
+            String s;
+            for (auto v : refPower) s << String (v, 12) << " ";
+            ref.setProperty ("power", s.trim(), nullptr);
+            ref.setProperty ("name", refName, nullptr);
+        }
+    }
+    state.removeChild (state.getChildWithName ("Reference"), nullptr);
+    state.appendChild (ref, nullptr);
     if (auto xml = state.createXml()) copyXmlToBinary (*xml, dest);
 }
 
@@ -612,6 +733,23 @@ void PotatoEQProcessor::setStateInformation (const void* data, int size)
         learnDone = ok && (bool) learn["done"];
         learnProgress = learnDone ? 1.0f : 0.0f;
         lastProfile = -1;   // forces the curve to be rebuilt from the saved spectrum
+    }
+    auto ref = state.getChildWithName ("Reference");
+    if (ref.isValid() && ref.hasProperty ("power"))
+    {
+        auto parts = StringArray::fromTokens (ref["power"].toString().substring (0, 4096), " ", "");
+        std::array<double, arc::kSpecBins> pw {};
+        bool ok = parts.size() == arc::kSpecBins;
+        for (int i = 0; ok && i < arc::kSpecBins; ++i)
+        {
+            pw[(size_t) i] = parts[i].getDoubleValue();
+            ok = std::isfinite (pw[(size_t) i]) && pw[(size_t) i] >= 0.0 && pw[(size_t) i] < 1e30;
+        }
+        if (ok)
+        {
+            const SpinLock::ScopedLockType lock (refLock);
+            refPower = pw; refName = ref["name"].toString().substring (0, 200); refValid = true; ++refVersion;
+        }
     }
     apvts.replaceState (state);
 }

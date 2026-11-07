@@ -321,7 +321,7 @@ void EqDisplay::paint (Graphics& g)
     const int cols = (int) (a.getWidth() / 3) + 2;
     std::vector<double> total ((size_t) cols, 0.0);
     const auto snap = proc.autoSnapshot();
-    const bool autoOn = (int) proc.apvts.getRawParameterValue (params::id::autoMode)->load() != params::autoOff && snap.result.curve.valid;
+    const bool autoOn = proc.effectiveAutoMode() != params::autoOff && snap.result.curve.valid;
     const double amount = proc.apvts.getRawParameterValue (params::id::autoAmount)->load() / 100.0;
     const bool linear = (int) proc.apvts.getRawParameterValue (params::id::phaseMode)->load() == 1;
 
