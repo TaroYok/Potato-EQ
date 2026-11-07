@@ -2,27 +2,48 @@
 
 using namespace juce;
 
-// ---------------------------------------------------------------- look and feel
-PotatoLookAndFeel::PotatoLookAndFeel()
+// ---------------------------------------------------------------- look and feel (Frutiger Aero, modernised)
+PotatoLookAndFeel::PotatoLookAndFeel() { refreshColours(); }
+
+void PotatoLookAndFeel::refreshColours()
 {
     setColour (ResizableWindow::backgroundColourId, theme::bg);
     setColour (ComboBox::backgroundColourId, theme::panelHi);
     setColour (ComboBox::outlineColourId, theme::grid);
     setColour (ComboBox::textColourId, theme::text);
-    setColour (ComboBox::arrowColourId, theme::textDim);
-    setColour (PopupMenu::backgroundColourId, theme::panel);
+    setColour (ComboBox::arrowColourId, theme::accent);
+    setColour (PopupMenu::backgroundColourId, theme::panel.darker (0.2f));
     setColour (PopupMenu::textColourId, theme::text);
-    setColour (PopupMenu::highlightedBackgroundColourId, theme::accent.withAlpha (0.25f));
+    setColour (PopupMenu::headerTextColourId, theme::accent);
+    setColour (PopupMenu::highlightedBackgroundColourId, theme::accent.withAlpha (0.3f));
     setColour (PopupMenu::highlightedTextColourId, Colours::white);
     setColour (Label::textColourId, theme::text);
     setColour (Slider::textBoxTextColourId, theme::text);
     setColour (Slider::textBoxOutlineColourId, Colours::transparentBlack);
-    setColour (Slider::textBoxBackgroundColourId, Colours::transparentBlack);
+    setColour (Slider::textBoxBackgroundColourId, Colours::black.withAlpha (0.18f));
     setColour (TextButton::buttonColourId, theme::panelHi);
+    setColour (TextButton::buttonOnColourId, theme::accent.darker (0.3f));
     setColour (TextButton::textColourOffId, theme::text);
+    setColour (TextButton::textColourOnId, Colours::white);
     setColour (ToggleButton::textColourId, theme::text);
     setColour (ToggleButton::tickColourId, theme::accent);
     setColour (TooltipWindow::backgroundColourId, theme::panel);
+    setColour (TooltipWindow::textColourId, theme::text);
+    setColour (TooltipWindow::outlineColourId, theme::accent.withAlpha (0.4f));
+}
+
+// glossy pill used by buttons and combo boxes
+static void drawPill (Graphics& g, Rectangle<float> r, Colour base, bool over, bool down)
+{
+    const float rad = jmin (r.getHeight() * 0.5f, 10.0f);
+    auto c = down ? base.brighter (0.25f) : over ? base.brighter (0.12f) : base;
+    g.setGradientFill (ColourGradient (c.brighter (0.25f), 0, r.getY(), c.darker (0.3f), 0, r.getBottom(), false));
+    g.fillRoundedRectangle (r, rad);
+    auto sheen = r.reduced (2.0f, 1.5f).removeFromTop (r.getHeight() * 0.48f);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.28f), 0, sheen.getY(), Colours::white.withAlpha (0.04f), 0, sheen.getBottom(), false));
+    g.fillRoundedRectangle (sheen, rad - 1.5f);
+    g.setColour (Colours::white.withAlpha (over ? 0.32f : 0.2f));
+    g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
 }
 
 void PotatoLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h, float pos, float start, float end, Slider& s)
@@ -31,47 +52,80 @@ void PotatoLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int 
     const float r = jmin (b.getWidth(), b.getHeight()) / 2.0f;
     const auto c = b.getCentre();
     const float ang = start + pos * (end - start);
-    const auto col = s.findColour (Slider::rotarySliderFillColourId);
+    const auto col = s.isEnabled() ? s.findColour (Slider::rotarySliderFillColourId) : theme::textDim.withAlpha (0.5f);
 
     Path track; track.addCentredArc (c.x, c.y, r - 2, r - 2, 0, start, end, true);
-    g.setColour (theme::grid); g.strokePath (track, PathStrokeType (3.0f, PathStrokeType::curved, PathStrokeType::rounded));
+    g.setColour (Colours::black.withAlpha (0.35f)); g.strokePath (track, PathStrokeType (4.0f, PathStrokeType::curved, PathStrokeType::rounded));
     const bool bipolar = s.getMinimum() < 0 && s.getMaximum() > 0;
     const float from = bipolar ? (start + end) / 2 : start;
     Path val; val.addCentredArc (c.x, c.y, r - 2, r - 2, 0, jmin (from, ang), jmax (from, ang), true);
-    g.setColour (s.isEnabled() ? col : theme::textDim); g.strokePath (val, PathStrokeType (3.0f, PathStrokeType::curved, PathStrokeType::rounded));
-    g.setColour (theme::panelHi); g.fillEllipse (Rectangle<float> (2 * (r - 6), 2 * (r - 6)).withCentre (c));
-    g.setColour (theme::text);
-    g.drawLine (Line<float> (c, c.getPointOnCircumference (r - 8, ang)), 2.0f);
+    g.setColour (col.withAlpha (0.35f)); g.strokePath (val, PathStrokeType (8.0f, PathStrokeType::curved, PathStrokeType::rounded));   // glow
+    g.setColour (col); g.strokePath (val, PathStrokeType (3.5f, PathStrokeType::curved, PathStrokeType::rounded));
+    theme::drawOrb (g, c, r - 7, theme::chrome.darker (0.15f));   // chrome knob cap
+    g.setColour (Colours::black.withAlpha (s.isEnabled() ? 0.75f : 0.3f));
+    g.drawLine (Line<float> (c.getPointOnCircumference ((r - 7) * 0.3f, ang), c.getPointOnCircumference (r - 10, ang)), 2.2f);
 }
 
 void PotatoLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, float pos, float, float, Slider::SliderStyle, Slider& s)
 {
     const auto b = Rectangle<int> (x, y, w, h).toFloat();
-    const auto track = b.withSizeKeepingCentre (b.getWidth(), 4.0f);
-    g.setColour (theme::grid); g.fillRoundedRectangle (track, 2);
-    g.setColour (s.findColour (Slider::trackColourId)); g.fillRoundedRectangle (track.withRight (pos), 2);
-    g.setColour (theme::text); g.fillEllipse (Rectangle<float> (12, 12).withCentre ({ pos, b.getCentreY() }));
+    const auto track = b.withSizeKeepingCentre (b.getWidth(), 6.0f);
+    g.setColour (Colours::black.withAlpha (0.35f)); g.fillRoundedRectangle (track, 3);
+    const auto col = s.findColour (Slider::trackColourId);
+    g.setGradientFill (ColourGradient (col.brighter (0.3f), 0, track.getY(), col.darker (0.2f), 0, track.getBottom(), false));
+    g.fillRoundedRectangle (track.withRight (pos), 3);
+    theme::drawOrb (g, { pos, b.getCentreY() }, 7.5f, Colour (0xffdff3ff));
 }
 
 void PotatoLookAndFeel::drawButtonBackground (Graphics& g, Button& b, const Colour& base, bool over, bool down)
 {
-    auto r = b.getLocalBounds().toFloat().reduced (0.5f);
-    auto c = b.getToggleState() ? theme::accent.withAlpha (0.35f) : base;
-    if (down) c = c.brighter (0.2f); else if (over) c = c.brighter (0.08f);
-    g.setColour (c); g.fillRoundedRectangle (r, 4);
-    g.setColour (theme::grid.brighter (0.2f)); g.drawRoundedRectangle (r, 4, 1);
+    drawPill (g, b.getLocalBounds().toFloat().reduced (0.5f), b.getToggleState() ? theme::accent.darker (0.25f) : base, over, down);
+}
+
+void PotatoLookAndFeel::drawComboBox (Graphics& g, int w, int h, bool down, int, int, int, int, ComboBox& box)
+{
+    drawPill (g, Rectangle<float> (0, 0, (float) w, (float) h).reduced (0.5f), theme::panelHi, box.isMouseOver (true), down);
+    Path arrow;
+    const float ax = (float) w - 16.0f, ay = (float) h * 0.5f;
+    arrow.startNewSubPath (ax - 4, ay - 2); arrow.lineTo (ax, ay + 2); arrow.lineTo (ax + 4, ay - 2);
+    g.setColour (box.isEnabled() ? theme::accent : theme::textDim);
+    g.strokePath (arrow, PathStrokeType (1.8f, PathStrokeType::curved, PathStrokeType::rounded));
+}
+
+void PotatoLookAndFeel::positionComboBoxText (ComboBox& box, Label& label)
+{
+    label.setBounds (10, 1, box.getWidth() - 30, box.getHeight() - 2);
+    label.setFont (getComboBoxFont (box));
+}
+
+void PotatoLookAndFeel::drawPopupMenuBackground (Graphics& g, int w, int h)
+{
+    g.fillAll (theme::panel.darker (0.35f));
+    g.setColour (Colours::white.withAlpha (0.12f));
+    g.drawRect (0, 0, w, h, 1);
 }
 
 void PotatoLookAndFeel::drawToggleButton (Graphics& g, ToggleButton& b, bool over, bool)
 {
     auto r = b.getLocalBounds().toFloat();
-    auto box = r.removeFromLeft (r.getHeight()).reduced (4);
-    g.setColour (b.getToggleState() ? theme::accent : (over ? theme::panelHi.brighter (0.2f) : theme::panelHi));
-    g.fillRoundedRectangle (box, 3);
-    g.setColour (theme::grid.brighter (0.3f)); g.drawRoundedRectangle (box, 3, 1);
+    auto box = r.removeFromLeft (r.getHeight()).reduced (3.5f);
+    const bool on = b.getToggleState();
+    if (on)
+    {   // lit aqua bubble with glow
+        g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.5f), box.getCentreX(), box.getCentreY(), theme::accent.withAlpha (0.0f), box.getRight() + 5, box.getCentreY(), true));
+        g.fillEllipse (box.expanded (5));
+    }
+    theme::drawOrb (g, box.getCentre(), box.getWidth() * 0.5f, on ? theme::accent : (over ? theme::panelHi.brighter (0.3f) : theme::panelHi), on);
     g.setColour (b.isEnabled() ? theme::text : theme::textDim);
     g.setFont (theme::font (12.5f));
-    g.drawText (b.getButtonText(), r.withTrimmedLeft (4), Justification::centredLeft);
+    g.drawText (b.getButtonText(), r.withTrimmedLeft (5), Justification::centredLeft);
+}
+
+void PotatoLookAndFeel::drawTooltip (Graphics& g, const String& text, int w, int h)
+{
+    theme::drawGlassPanel (g, Rectangle<float> (0, 0, (float) w, (float) h), 6.0f, theme::panel.darker (0.2f));
+    g.setColour (theme::text); g.setFont (theme::font (12.5f));
+    g.drawFittedText (text, Rectangle<int> (0, 0, w, h).reduced (8, 4), Justification::centredLeft, 4);
 }
 
 // ---------------------------------------------------------------- knob
@@ -182,7 +236,7 @@ void BandPanel::timerCallback()
 void BandPanel::paint (Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
-    g.setColour (theme::panel); g.fillRoundedRectangle (bounds, 6);
+    theme::drawGlassPanel (g, bounds);
     if (band < 0)
     {
         g.setColour (theme::textDim); g.setFont (theme::font (13.0f));
@@ -191,7 +245,7 @@ void BandPanel::paint (Graphics& g)
         return;
     }
     const auto c = theme::bandColour (band);
-    g.setColour (c.withAlpha (0.45f)); g.drawRoundedRectangle (bounds, 6, 1.0f);
+    g.setColour (c.withAlpha (0.5f)); g.drawRoundedRectangle (bounds.reduced (1.0f), theme::radius - 1, 1.2f);
     auto r = getLocalBounds().reduced (12, 8);
     g.setColour (c); g.fillEllipse (Rectangle<float> ((float) r.getX(), (float) r.getY() + 3, 10, 10));
     g.setColour (theme::text); g.setFont (theme::font (13.0f, true));
@@ -268,7 +322,7 @@ void LoudnessPanel::timerCallback()
 
 void LoudnessPanel::paint (Graphics& g)
 {
-    g.setColour (theme::panel); g.fillRoundedRectangle (getLocalBounds().toFloat(), 6);
+    theme::drawGlassPanel (g, getLocalBounds().toFloat());
     auto r0 = getLocalBounds().reduced (12, 10);
     g.setColour (theme::text); g.setFont (theme::font (13.0f, true));
     g.drawText ("LOUDNESS  (output)", r0.removeFromTop (18), Justification::centredLeft);
@@ -418,7 +472,7 @@ void AutoPanel::timerCallback()
 
 void AutoPanel::paint (Graphics& g)
 {
-    g.setColour (theme::panel); g.fillRoundedRectangle (getLocalBounds().toFloat(), 6);
+    theme::drawGlassPanel (g, getLocalBounds().toFloat());
     auto r = getLocalBounds().reduced (12, 10);
     g.setColour (theme::text); g.setFont (theme::font (13.0f, true));
     g.drawText ("AUTO EQ", r.removeFromTop (18), Justification::centredLeft);

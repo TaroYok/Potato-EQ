@@ -7,6 +7,8 @@ using namespace juce;
 PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
     : AudioProcessorEditor (&p), proc (p), display (p), bandPanel (p), loudness (p), autoPanel (p)
 {
+    theme::applyScheme (ana::get (proc.apvts.state, ana::scheme, 0));
+    lnf.refreshColours();
     setLookAndFeel (&lnf);
     auto& s = proc.apvts;
 
@@ -78,7 +80,7 @@ PotatoEQEditor::~PotatoEQEditor() { setLookAndFeel (nullptr); }
 void PotatoEQEditor::showAnalyzerMenu()
 {
     auto& st = proc.apvts.state;
-    PopupMenu m, res, spd, tlt, rng, smo;
+    PopupMenu m, res, spd, tlt, rng, smo, vw, fl, col, sch;
     auto fill = [&] (PopupMenu& sub, const StringArray& names, const Identifier& id, int def, int base)
     {
         const int cur = ana::get (st, id, def);
@@ -89,6 +91,24 @@ void PotatoEQEditor::showAnalyzerMenu()
     fill (tlt, ana::tiltNames, ana::tilt, 2, 300);
     fill (rng, ana::rangeNames, ana::range, 1, 400);
     fill (smo, ana::smoothingNames, ana::smoothing, 2, 500);
+    fill (vw, ana::viewNames, ana::view, 0, 600);
+    fill (fl, ana::fillNames, ana::fill, 1, 700);
+    {
+        const int cur = ana::get (st, ana::palette, 0);
+        for (int i = 0; i < (int) theme::palettePresets().size(); ++i) col.addItem (800 + i, theme::palettePresets()[(size_t) i].name, true, cur == i);
+        col.addSeparator();
+        col.addItem (899, "Custom colours...", true, cur >= (int) theme::palettePresets().size());
+    }
+    {
+        const int cur = ana::get (st, ana::scheme, 0);
+        for (int i = 0; i < (int) theme::schemes().size(); ++i) sch.addItem (950 + i, theme::schemes()[(size_t) i].name, true, cur == i);
+    }
+    m.addSectionHeader ("Look");
+    m.addSubMenu ("Colour scheme", sch);
+    m.addSubMenu ("View", vw);
+    m.addSubMenu ("Fill style", fl);
+    m.addSubMenu ("Colours", col);
+    m.addSectionHeader ("Analyzer");
     m.addSubMenu ("Resolution", res);
     m.addSubMenu ("Speed", spd);
     m.addSubMenu ("Tilt", tlt);
@@ -106,6 +126,11 @@ void PotatoEQEditor::showAnalyzerMenu()
     {
         if (safe == nullptr || r == 0) return;
         auto& s = safe->proc.apvts.state;
+        if (r >= 950) { safe->setScheme (r - 950); return; }
+        if (r == 899) { safe->showColourDialog(); return; }
+        if (r >= 800) { s.setProperty (ana::palette, r - 800, nullptr); return; }
+        if (r >= 700) { s.setProperty (ana::fill, r - 700, nullptr); return; }
+        if (r >= 600) { s.setProperty (ana::view, r - 600, nullptr); return; }
         if (r == 1) { s.setProperty (ana::peakHold, ana::get (s, ana::peakHold, 0) ? 0 : 1, nullptr); safe->display.clearPeakHold(); }
         else if (r == 2) safe->display.clearPeakHold();
         else if (r == 6) s.setProperty (ana::noteGrid, ana::get (s, ana::noteGrid, 1) ? 0 : 1, nullptr);
@@ -144,14 +169,102 @@ void PotatoEQEditor::showPresetMenu()
     });
 }
 
+// Pick the lightest (loud) and darkest (quiet) colour of the analyzer gradient.
+class ColourDialog : public Component, private ChangeListener
+{
+public:
+    explicit ColourDialog (ValueTree st) : state (st)
+    {
+        const auto pal = theme::paletteFrom (state);
+        for (auto* cs : { &light, &dark })
+        {
+            cs->setColour (ColourSelector::backgroundColourId, Colours::transparentBlack);
+            cs->addChangeListener (this);
+            addAndMakeVisible (*cs);
+        }
+        light.setCurrentColour (pal.light, dontSendNotification);
+        dark.setCurrentColour (pal.dark, dontSendNotification);
+        setSize (520, 330);
+    }
+    void paint (Graphics& g) override
+    {
+        g.setColour (theme::text); g.setFont (theme::font (13.0f, true));
+        g.drawText ("Lightest  (loud)", 10, 6, 240, 18, Justification::centredLeft);
+        g.drawText ("Darkest  (quiet)", 270, 6, 240, 18, Justification::centredLeft);
+        const auto pal = theme::paletteFrom (state);
+        auto bar = Rectangle<float> (10, (float) getHeight() - 28, (float) getWidth() - 20, 16);
+        ColourGradient grad (pal.light, bar.getX(), 0, pal.dark, bar.getRight(), 0, false);
+        grad.addColour (0.5, pal.mid);
+        g.setGradientFill (grad); g.fillRoundedRectangle (bar, 8);
+    }
+    void resized() override
+    {
+        light.setBounds (10, 26, 240, getHeight() - 64);
+        dark.setBounds (270, 26, 240, getHeight() - 64);
+    }
+
+private:
+    void changeListenerCallback (ChangeBroadcaster*) override
+    {
+        state.setProperty (ana::customLight, (int64) light.getCurrentColour().getARGB(), nullptr);
+        state.setProperty (ana::customDark, (int64) dark.getCurrentColour().getARGB(), nullptr);
+        state.setProperty (ana::palette, (int) theme::palettePresets().size(), nullptr);   // = custom
+        repaint();
+    }
+    ValueTree state;
+    ColourSelector light { ColourSelector::showColourspace | ColourSelector::showColourAtTop },
+                   dark  { ColourSelector::showColourspace | ColourSelector::showColourAtTop };
+};
+
+void PotatoEQEditor::setScheme (int i)
+{
+    auto& st = proc.apvts.state;
+    st.setProperty (ana::scheme, i, nullptr);
+    st.setProperty (ana::palette, theme::schemes()[(size_t) i].palette, nullptr);   // matching analyzer colours (still changeable)
+    theme::applyScheme (i);
+    lnf.refreshColours();
+    sendLookAndFeelChange();
+    repaint();
+}
+
+void PotatoEQEditor::showColourDialog()
+{
+    CallOutBox::launchAsynchronously (std::make_unique<ColourDialog> (proc.apvts.state), anaMenu.getScreenBounds(), nullptr);
+}
+
 void PotatoEQEditor::paint (Graphics& g)
 {
-    g.fillAll (theme::bg);
-    auto top = getLocalBounds().removeFromTop (44).reduced (14, 0);
-    g.setColour (theme::accent); g.setFont (theme::font (20.0f, true));
-    g.drawText ("POTATO", top.removeFromLeft (84), Justification::centredLeft);
-    g.setColour (theme::text); g.setFont (theme::font (20.0f));
-    g.drawText ("EQ", top.removeFromLeft (40), Justification::centredLeft);
+    auto b = getLocalBounds().toFloat();
+    // glossy black glass with a diagonal reflection, like the face of an iPod touch
+    g.setGradientFill (ColourGradient (theme::bgTop, 0, 0, theme::bgBottom, 0, b.getBottom(), false));
+    g.fillAll();
+    Path refl;
+    refl.startNewSubPath (0, 0); refl.lineTo (b.getWidth() * 0.62f, 0); refl.lineTo (b.getWidth() * 0.30f, b.getHeight()); refl.lineTo (0, b.getHeight()); refl.closeSubPath();
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.045f), 0, 0, Colours::white.withAlpha (0.0f), b.getWidth() * 0.45f, b.getHeight() * 0.6f, false));
+    g.fillPath (refl);
+
+    // iPhone OS style navigation bar: slate-blue gloss, chrome edge
+    auto head = b.removeFromTop (44.0f).reduced (6.0f, 4.0f);
+    g.setGradientFill (ColourGradient (theme::navTop, 0, head.getY(), theme::navBottom, 0, head.getBottom(), false));
+    g.fillRoundedRectangle (head, theme::radius);
+    auto gloss = head.withHeight (head.getHeight() * 0.5f);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.30f), 0, gloss.getY(), Colours::white.withAlpha (0.08f), 0, gloss.getBottom(), false));
+    g.fillRoundedRectangle (gloss, theme::radius);
+    g.setColour (Colours::black.withAlpha (0.45f));
+    g.drawRoundedRectangle (head, theme::radius, 1.0f);
+
+    // engraved logo
+    auto top = getLocalBounds().removeFromTop (44).reduced (16, 0);
+    auto logo = top.removeFromLeft (124);
+    g.setFont (theme::font (21.0f, true));
+    const bool lightBar = theme::navText.getBrightness() < 0.5f;
+    g.setColour (lightBar ? Colours::white.withAlpha (0.6f) : Colours::black.withAlpha (0.45f));   // engraving
+    g.drawText ("POTATO", logo.translated (0, lightBar ? 1 : -1).withWidth (84), Justification::centredLeft);
+    g.setColour (theme::navText);
+    g.drawText ("POTATO", logo.withWidth (84), Justification::centredLeft);
+    g.setFont (theme::font (21.0f));
+    g.setColour (theme::navText.withAlpha (0.85f));
+    g.drawText ("EQ", logo.withTrimmedLeft (84), Justification::centredLeft);
 }
 
 void PotatoEQEditor::resized()

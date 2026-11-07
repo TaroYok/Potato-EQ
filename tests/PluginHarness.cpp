@@ -399,6 +399,33 @@ int main (int argc, char** argv)
         FileOutputStream os (f);
         PNGImageFormat().writeImageToStream (img, os);
         check (f.existsAsFile(), "editor rendered to " + f.getFileName(), 1, 1);
+        // style samples: fill styles, palettes and views
+        if (auto* pe = dynamic_cast<PotatoEQEditor*> (ed.get()))
+            for (int sc = 0; sc < (int) theme::schemes().size(); ++sc)
+            {
+                pe->setScheme (sc);
+                for (int i = 0; i < 25; ++i) { run (*p, 0.03, pinkish); pump (25); }
+                auto im = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+                File sf = f.getSiblingFile (f.getFileNameWithoutExtension() + "-scheme" + String (sc) + ".png");
+                sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so);
+            }
+        if (auto* pe = dynamic_cast<PotatoEQEditor*> (ed.get())) pe->setScheme (0);
+        struct Look { int view, fill, palette; const char* name; };
+        const Look looks[] = { { 0, 1, 0, "level-ipodblue" }, { 0, 2, 3, "heat-sunset" }, { 0, 3, 0, "slices-ipodblue" },
+                               { 1, 1, 4, "spectrogram-ember" } };
+        for (auto& lk : looks)
+        {
+            p->apvts.state.setProperty (ana::view, lk.view, nullptr);
+            p->apvts.state.setProperty (ana::fill, lk.fill, nullptr);
+            p->apvts.state.setProperty (ana::palette, lk.palette, nullptr);
+            for (int i = 0; i < 40; ++i) { run (*p, 0.03, pinkish); pump (25); }
+            auto im = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+            File sf = f.getSiblingFile (f.getFileNameWithoutExtension() + "-" + lk.name + ".png");
+            sf.deleteFile();
+            FileOutputStream so (sf);
+            PNGImageFormat().writeImageToStream (im, so);
+        }
+        p->apvts.state.setProperty (ana::view, 0, nullptr); p->apvts.state.setProperty (ana::fill, 1, nullptr); p->apvts.state.setProperty (ana::palette, 0, nullptr);
         // spectrum grab: a 440 Hz tone in the analyzer; clicking its peak and dragging up should create a band there
         EqDisplay* disp = nullptr;
         for (auto* c : ed->getChildren()) if (auto* d = dynamic_cast<EqDisplay*> (c)) disp = d;

@@ -10,7 +10,7 @@ EqDisplay::EqDisplay (PotatoEQProcessor& p) : proc (p)
 {
     for (auto* s : { &pre, &post, &side }) s->ring.assign (kMaxSize, 0.0f);
     fftData.assign (2 * kMaxSize, 0.0f);
-    setOpaque (true);
+    setOpaque (false);   // rounded corners
     startTimerHz (30);
 }
 
@@ -114,6 +114,11 @@ void EqDisplay::timerCallback()
     pullSpectrum (proc.preFifo, pre, ! frozen && (mode == 1 || mode == 3));
     pullSpectrum (proc.postFifo, post, ! frozen && (mode == 2 || mode == 3));
     pullSpectrum (proc.scFifo, side, ! frozen && mode != 0 && proc.sidechainActive() && setting (ana::showSc, 1) != 0);
+    if (setting (ana::view, 0) == 1 && ! frozen)
+    {
+        const Spectrum* src = (mode == 2 || mode == 3) ? &post : (mode == 1 ? &pre : nullptr);
+        if (src != nullptr) updateWaterfall (*src);
+    }
     for (int b = 0; b < arc::kNumBands; ++b) bands[(size_t) b] = proc.bandSettings (b);
     if (mouseInside && dragging < 0 && hovered < 0) findPeakNear (mousePos);
     repaint();
@@ -209,7 +214,12 @@ const std::vector<float>& EqDisplay::bandCurve (int band, const arc::BandSetting
 
 void EqDisplay::paint (Graphics& g)
 {
-    g.fillAll (theme::bg);
+    // rounded glass plot
+    const auto outer = getLocalBounds().toFloat();
+    Path clip; clip.addRoundedRectangle (outer, theme::radius);
+    g.reduceClipRegion (clip);
+    g.setGradientFill (ColourGradient (theme::plotBg.brighter (0.25f), 0, outer.getY(), theme::plotBg.darker (0.3f), 0, outer.getBottom(), false));
+    g.fillRect (outer);
     const auto a = plotArea();
     const double fs = proc.getFs();
     const double range = displayRange();
@@ -290,8 +300,21 @@ void EqDisplay::paint (Graphics& g)
             g.strokePath (specPath (s.peak, false), PathStrokeType (1.0f));
         }
     };
-    if (mode == 1 || mode == 3) drawSpec (pre, theme::preSpec, true);
-    if (mode == 2 || mode == 3) drawSpec (post, theme::postSpec, mode == 2);
+    const auto pal = theme::paletteFrom (proc.apvts.state);
+    const int view = setting (ana::view, 0), style = setting (ana::fill, 1);
+    const Spectrum* main = (mode == 2 || mode == 3) ? &post : (mode == 1 ? &pre : nullptr);
+    if (main != nullptr)
+    {
+        if (view == 1 && waterfall.isValid())
+            g.drawImage (waterfall, a, RectanglePlacement::stretchToFit);
+        else
+        {
+            if (mode == 3) { g.setColour (Colours::white.withAlpha (0.28f)); g.strokePath (specPath (pre.display, false), PathStrokeType (1.0f)); }
+            drawStyledSpectrum (g, *main, pal, style);
+            if (hold) { g.setColour (pal.light.withAlpha (0.75f)); g.strokePath (specPath (main->peak, false), PathStrokeType (1.0f)); }
+        }
+    }
+    (void) drawSpec;
     if (mode != 0 && proc.sidechainActive() && setting (ana::showSc, 1) != 0 && ! side.display.empty())
     {
         g.setColour (theme::scSpec.withAlpha (0.85f));
@@ -382,8 +405,8 @@ void EqDisplay::paint (Graphics& g)
             const float y = jlimit (a.getY() - 2, a.getBottom() + 2, yForGain (total[(size_t) i]));
             if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
         }
-        g.setColour (Colours::white.withAlpha (0.12f));
-        g.strokePath (p, PathStrokeType (5.0f, PathStrokeType::curved, PathStrokeType::rounded));
+        g.setColour (theme::accent.withAlpha (0.18f));
+        g.strokePath (p, PathStrokeType (7.0f, PathStrokeType::curved, PathStrokeType::rounded));
         g.setColour (Colours::white.withAlpha (0.95f));
         g.strokePath (p, PathStrokeType (2.0f, PathStrokeType::curved, PathStrokeType::rounded));
     }
@@ -403,11 +426,14 @@ void EqDisplay::paint (Graphics& g)
             g.drawLine (pos.x, pos.y, pos.x, jlimit (a.getY(), a.getBottom(), yr), 2.0f);
             g.drawEllipse (Rectangle<float> (r * 2.4f, r * 2.4f).withCentre ({ pos.x, yr }), 1.2f);
         }
-        g.setColour (s.bypass ? theme::panelHi : c);
-        g.fillEllipse (Rectangle<float> (r * 2, r * 2).withCentre (pos));
-        g.setColour (b == selected ? Colours::white : Colours::black.withAlpha (0.6f));
-        g.drawEllipse (Rectangle<float> (r * 2, r * 2).withCentre (pos), b == selected ? 2.0f : 1.0f);
-        g.setColour (s.bypass ? theme::textDim : Colours::black);
+        if (b == selected)
+        {   // soft halo around the selected band
+            g.setGradientFill (ColourGradient (c.withAlpha (0.45f), pos.x, pos.y, c.withAlpha (0.0f), pos.x + r * 2.6f, pos.y, true));
+            g.fillEllipse (Rectangle<float> (r * 5.2f, r * 5.2f).withCentre (pos));
+        }
+        theme::drawOrb (g, pos, r, s.bypass ? theme::panelHi : c, b == selected || b == hovered);
+        if (b == selected) { g.setColour (Colours::white.withAlpha (0.9f)); g.drawEllipse (Rectangle<float> (r * 2 + 3, r * 2 + 3).withCentre (pos), 1.5f); }
+        g.setColour (s.bypass ? theme::textDim : Colours::black.withAlpha (0.8f));
         g.setFont (theme::font (10.0f, true));
         g.drawText (String (b + 1), Rectangle<float> (r * 2, r * 2).withCentre (pos), Justification::centred);
     }
@@ -474,6 +500,90 @@ void EqDisplay::paint (Graphics& g)
     {
         g.setColour (theme::textDim); g.setFont (theme::font (11.0f));
         g.drawText (status, a.withHeight (16).translated (6, 2), Justification::left);
+    }
+}
+
+// Spectrum fill styles. Colour always follows loudness: darkest = quiet, lightest = loud.
+void EqDisplay::drawStyledSpectrum (Graphics& g, const Spectrum& s, const theme::Palette& pal, int style)
+{
+    if (s.display.empty()) return;
+    const auto a = plotArea();
+    // colour scale follows the loudest part of the current spectrum: top 36 dB spread from darkest to lightest
+    const float top = *std::max_element (s.display.begin(), s.display.end());
+    auto levelAt = [top] (float db) { return jlimit (0.0f, 1.0f, (db - (top - 36.0f)) / 36.0f); };
+
+    Path area;
+    area.startNewSubPath (a.getX(), a.getBottom());
+    Point<float> prev;
+    for (size_t i = 0; i < s.display.size(); ++i)
+    {
+        const Point<float> pt (a.getX() + (float) i * kColStep, yForSpectrum (s.display[i]));
+        if (i == 0) area.lineTo (pt); else area.quadraticTo (prev, (prev + pt) * 0.5f);
+        prev = pt;
+    }
+    area.lineTo (prev); area.lineTo (a.getRight(), a.getBottom()); area.closeSubPath();
+
+    if (style == 3)
+    {   // slices: Riemann-sum bars, each coloured by its own level
+        const float w = 3.5f, gap = 2.0f;
+        for (float x = a.getX(); x < a.getRight(); x += w + gap)
+        {
+            const int c0 = (int) ((x - a.getX()) / kColStep), c1 = jmin ((int) s.display.size() - 1, (int) ((x + w - a.getX()) / kColStep));
+            float db = -200.0f;
+            for (int c = jmax (0, c0); c <= c1; ++c) db = jmax (db, s.display[(size_t) c]);
+            const float y = yForSpectrum (db), t = levelAt (db);
+            if (y >= a.getBottom() - 1) continue;
+            const Rectangle<float> bar (x, y, w, a.getBottom() - y);
+            g.setGradientFill (ColourGradient (pal.at (t).withAlpha (0.95f), 0, y, pal.at (t * 0.35f).withAlpha (0.35f), 0, a.getBottom(), false));
+            g.fillRoundedRectangle (bar, 1.75f);
+            g.setColour (Colours::white.withAlpha (0.3f * t));
+            g.fillRoundedRectangle (bar.withHeight (jmin (2.0f, bar.getHeight())), 1.0f);
+        }
+        return;
+    }
+    if (style == 1)
+    {   // colour by level: hue follows each frequency's loudness, fading toward the floor
+        ColourGradient grad (pal.at (levelAt (s.display.front())), a.getX(), 0, pal.at (levelAt (s.display.back())), a.getRight(), 0, false);
+        for (size_t i = 0; i < s.display.size(); i += 4)
+            grad.addColour (jlimit (0.0, 1.0, (double) i * kColStep / a.getWidth()), pal.at (levelAt (s.display[i])).withAlpha (0.92f));
+        g.setGradientFill (grad);
+        g.fillPath (area);
+        g.setGradientFill (ColourGradient (theme::plotBg.withAlpha (0.0f), 0, a.getY(), theme::plotBg.withAlpha (0.85f), 0, a.getBottom(), false));
+        g.fillPath (area);
+    }
+    else if (style == 2)
+    {   // heat map: colour depends on height, so only loud peaks reach the lightest colour
+        ColourGradient grad (pal.light, 0, a.getY(), pal.dark.withAlpha (0.25f), 0, a.getBottom(), false);
+        grad.addColour (0.35, pal.at (0.7f));
+        grad.addColour (0.65, pal.at (0.35f).withAlpha (0.8f));
+        g.setGradientFill (grad);
+        g.fillPath (area);
+    }
+    Path line;
+    for (size_t i = 0; i < s.display.size(); ++i)
+    {
+        const Point<float> pt (a.getX() + (float) i * kColStep, yForSpectrum (s.display[i]));
+        if (i == 0) line.startNewSubPath (pt); else line.lineTo (pt);
+    }
+    g.setColour (pal.light.withAlpha (style == 0 ? 0.9f : 0.55f));
+    g.strokePath (line, PathStrokeType (style == 0 ? 1.4f : 1.0f));
+}
+
+// Spectrogram: one row per frame, scrolling down; brightness/colour = loudness.
+void EqDisplay::updateWaterfall (const Spectrum& s)
+{
+    const auto a = plotArea();
+    const int w = jmax (1, (int) s.display.size()), h = jmax (16, (int) a.getHeight() / 2);
+    if (! waterfall.isValid() || waterfall.getWidth() != w || waterfall.getHeight() != h)
+        waterfall = Image (Image::ARGB, w, h, true);
+    waterfall.moveImageSection (0, 1, 0, 0, w, h - 1);
+    const auto pal = theme::paletteFrom (proc.apvts.state);
+    const float frameTop = *std::max_element (s.display.begin(), s.display.end());
+    waterfallTop = jmax (frameTop, waterfallTop - 0.25f);   // slowly falling reference so quiet passages dim
+    for (int x = 0; x < w; ++x)
+    {
+        const float t = jlimit (0.0f, 1.0f, (s.display[(size_t) x] - (waterfallTop - 48.0f)) / 48.0f);
+        waterfall.setPixelAt (x, 0, pal.at (t).withAlpha (jlimit (0.0f, 1.0f, t * 1.4f)));
     }
 }
 

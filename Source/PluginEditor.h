@@ -10,7 +10,7 @@ public:
     ~PotatoEQEditor() override;
     void paint (juce::Graphics&) override;
     void resized() override;
-
+    void setScheme (int);   // whole-interface colour scheme
 private:
     PotatoEQProcessor& proc;
     PotatoLookAndFeel lnf;
@@ -26,9 +26,10 @@ private:
     juce::Label scaleL, outL;
     juce::ToggleButton autoGain { "Auto gain" }, freeze { "Freeze" }, experimental { "Experimental tools" };
     void updateExperimental();
-    juce::TextButton anaMenu { "Analyzer..." }, presetBtn { "Presets" };
+    juce::TextButton anaMenu { "Display..." }, presetBtn { "Presets" };
     void showPresetMenu();
     void showAnalyzerMenu();
+    void showColourDialog();
     std::unique_ptr<APVTS::ComboBoxAttachment> aPhase, aAnalyzer, aRange;
     std::unique_ptr<APVTS::SliderAttachment> aScale, aOut;
     std::unique_ptr<APVTS::ButtonAttachment> aAutoGain, aExperimental;

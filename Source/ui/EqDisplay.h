@@ -73,6 +73,10 @@ private:
     int fftOrder = 13;
     std::vector<float> fftData, window;
     std::vector<double> cum;   // prefix sums of bin power (spectrum smoothing)
+    juce::Image waterfall;     // spectrogram view: newest row at the top
+    float waterfallTop = -60.0f;
+    void updateWaterfall (const Spectrum&);
+    void drawStyledSpectrum (juce::Graphics&, const Spectrum&, const theme::Palette&, int style);
     Spectrum pre, post, side;
     std::array<arc::BandSettings, arc::kNumBands> bands;
 

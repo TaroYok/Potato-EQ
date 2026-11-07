@@ -8,10 +8,15 @@ class PotatoLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
     PotatoLookAndFeel();
+    void refreshColours();   // after a colour-scheme change
     void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos, float start, float end, juce::Slider&) override;
     void drawLinearSlider (juce::Graphics&, int x, int y, int w, int h, float pos, float min, float max, juce::Slider::SliderStyle, juce::Slider&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;
     void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool over, bool down) override;
+    void drawComboBox (juce::Graphics&, int w, int h, bool down, int, int, int, int, juce::ComboBox&) override;
+    void positionComboBoxText (juce::ComboBox&, juce::Label&) override;
+    void drawPopupMenuBackground (juce::Graphics&, int w, int h) override;
+    void drawTooltip (juce::Graphics&, const juce::String&, int w, int h) override;
     juce::Font getComboBoxFont (juce::ComboBox&) override { return theme::font (12.5f); }
     juce::Font getTextButtonFont (juce::TextButton&, int) override { return theme::font (12.5f, true); }
     juce::Font getLabelFont (juce::Label&) override { return theme::font (12.0f); }
