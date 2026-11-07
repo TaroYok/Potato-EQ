@@ -8,11 +8,13 @@ genre or instrument target curve.
 
 ## Download
 
-Every push to `main` builds the plugin for Windows, macOS and Linux on GitHub's servers.
-Open the **Actions** tab → the latest **Build plugin** run → **Artifacts**, and download
-`PotatoEQ-Windows` (or `-macOS`). Installation steps are in `INSTALL.txt` inside the download.
+Go to **[Releases](../../releases/latest)** and download **`PotatoEQ-Windows.zip`** (or `PotatoEQ-macOS.zip`).
+Unzip it and copy the **`Potato EQ.vst3`** folder into `C:\Program Files\Common Files\VST3`
+(Mac: `~/Library/Audio/Plug-Ins/VST3`), then rescan plugins in your DAW. The installers are attached there too.
 
-Pushing a tag like `v0.1.0` also creates a GitHub Release with the zips attached.
+Note: the green **Code → Download ZIP** button gives you the *source code*, not the plugin.
+
+Every push to `main` also builds the plugin; those builds are under **Actions → Build plugin → Artifacts**.
 
 ## Features
 
