@@ -422,6 +422,30 @@ int main (int argc, char** argv)
         }
         p->apvts.state.setProperty (ana::units, 0, nullptr);
         p->setParam (params::id::limiter, 0.0f);
+        // font drafts
+        if (auto* pe = dynamic_cast<PotatoEQEditor*> (ed.get()))
+        {
+            for (int fi = 0; fi < theme::fontNames.size(); ++fi)
+            {
+                pe->setUiFont (fi);
+                for (int i = 0; i < 15; ++i) { run (*p, 0.03, pinkish); pump (25); }
+                auto im = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+                File sf = f.getSiblingFile (f.getFileNameWithoutExtension() + "-font" + String (fi) + ".png");
+                sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so);
+            }
+            pe->setUiFont (0);
+            // a custom colour scheme
+            auto& st = p->apvts.state;
+            const uint32 custom[] = { 0xff2b2140, 0xff3a2f57, 0xff140f22, 0xffff8fb1, 0xff8fe3ff, 0xffb69cff, 0xfffff4fa, 0xff1b1030, 0xfff3e6ff };
+            for (int i = 0; i < theme::kCustomSlots; ++i) st.setProperty (ana::customSlot (i), (int64) custom[i], nullptr);
+            st.setProperty (ana::scheme, (int) theme::schemes().size(), nullptr);
+            pe->refreshLook();
+            for (int i = 0; i < 15; ++i) { run (*p, 0.03, pinkish); pump (25); }
+            auto im = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+            File sf = f.getSiblingFile (f.getFileNameWithoutExtension() + "-custom-scheme.png");
+            sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so);
+            pe->setScheme (0);
+        }
         struct Look { int view, fill, palette; const char* name; };
         const Look looks[] = { { 0, 1, 0, "level-ipodblue" }, { 0, 2, 3, "heat-sunset" }, { 0, 3, 0, "slices-ipodblue" },
                                { 1, 1, 4, "spectrogram-ember" } };

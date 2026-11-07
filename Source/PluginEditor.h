@@ -11,6 +11,8 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void setScheme (int);   // whole-interface colour scheme
+    void setUiFont (int);   // interface font
+    void refreshLook();     // re-apply colours after a change
 private:
     PotatoEQProcessor& proc;
     PotatoLookAndFeel lnf;
@@ -31,6 +33,7 @@ private:
     void showPresetMenu();
     void showAnalyzerMenu();
     void showColourDialog();
+    void showSchemeDialog();
     std::unique_ptr<APVTS::ComboBoxAttachment> aPhase, aAnalyzer, aRange;
     std::unique_ptr<APVTS::SliderAttachment> aScale, aOut;
     std::unique_ptr<APVTS::ButtonAttachment> aAutoGain, aExperimental;

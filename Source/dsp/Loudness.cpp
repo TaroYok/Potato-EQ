@@ -10,6 +10,7 @@ void LoudnessMeter::prepare (double sampleRate)
 {
     fs = sampleRate;
     subLen = std::max (1, (int) std::lround (fs * 0.1));
+    fastLen = std::max (1, (int) std::lround (fs * 0.01));
 
     // K-weighting for any sample rate (same derivation as libebur128)
     for (auto& c : kw)
@@ -67,6 +68,7 @@ void LoudnessMeter::reset()
     for (auto& h : tpHist) h.fill (0);
     tpPos = 0; tpMax = spMax = 0;
     rmsFast = rmsSlow = 0; peakHold = 0; holdLeft = 0; clip = false;
+    fastRing.fill (0); fastSum = fastChunk = 0; fastPos = fastCount = fastFill = 0; aMfast = -100.0f; aRecentPeak = 0.0f;
     aRms = aRmsSlow = aPeakHold = -100.0f; aClip = false;
     aM = aS = aI = aTp = aSp = aMmax = aSmax = -100.0f; aLra = 0.0f; aIvalid = false;
 }
@@ -111,6 +113,18 @@ void LoudnessMeter::process (const float* const* ch, int numCh, int numSamples)
         tpPos = (tpPos + 1) % kPerPhase;
         subSum += sum;
         if (++subPos >= subLen) endOfSubBlock();
+        // fast momentary: same 400 ms window, but slid every 10 ms
+        fastChunk += sum;
+        if (++fastCount >= fastLen)
+        {
+            fastSum += fastChunk - fastRing[(size_t) fastPos];
+            fastRing[(size_t) fastPos] = fastChunk;
+            fastPos = (fastPos + 1) % (int) fastRing.size();
+            fastFill = std::min (fastFill + 1, (int) fastRing.size());
+            fastChunk = 0; fastCount = 0;
+            if (fastFill == (int) fastRing.size())
+                aMfast.store ((float) lufsFromEnergy (std::max (0.0, fastSum) / ((double) fastLen * (double) fastRing.size())));
+        }
     }
     aTp.store ((float) (tpMax > 0 ? 20 * std::log10 (tpMax) : kFloor));
     aSp.store ((float) (spMax > 0 ? 20 * std::log10 (spMax) : kFloor));
@@ -121,6 +135,7 @@ void LoudnessMeter::process (const float* const* ch, int numCh, int numSamples)
     else if (holdLeft > 0) holdLeft -= dt;
     else peakHold *= std::pow (10.0, -20.0 * dt / 20.0);
     if (blockPeak >= 0.99999) clip = true;
+    for (float prev = aRecentPeak.load(); (float) blockPeak > prev && ! aRecentPeak.compare_exchange_weak (prev, (float) blockPeak);) {}
     auto toDb = [] (double v) { return (float) (v > 1e-10 ? 20 * std::log10 (v) : kFloor); };
     aPeakHold.store (toDb (peakHold));
     aRms.store ((float) (rmsFast > 1e-20 ? 10 * std::log10 (rmsFast) : kFloor));
@@ -214,8 +229,15 @@ LoudnessMeter::Readings LoudnessMeter::get() const
     Readings r;
     r.momentary = aM; r.shortTerm = aS; r.integrated = aI; r.lra = aLra;
     r.truePeakDb = aTp; r.samplePeakDb = aSp; r.momentaryMax = aMmax; r.shortTermMax = aSmax;
-    r.rmsDb = aRms; r.rmsSlowDb = aRmsSlow; r.peakHoldDb = aPeakHold; r.clipped = aClip;
+    r.rmsDb = aRms; r.rmsSlowDb = aRmsSlow; r.peakHoldDb = aPeakHold; r.clipped = aClip; r.momentaryFast = aMfast;
     r.integratedValid = aIvalid;
     return r;
 }
+float LoudnessMeter::takeRecentPeakDb()
+{
+    const float p = aRecentPeak.exchange (0.0f);
+    return p > 1e-6f ? 20.0f * std::log10 (p) : (float) kFloor;
+}
+
 } // namespace arc
+

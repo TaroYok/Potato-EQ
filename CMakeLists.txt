@@ -45,6 +45,15 @@ juce_add_plugin(PotatoEQ
     VST3_CATEGORIES Fx EQ Analyzer
     AU_MAIN_TYPE kAudioUnitType_Effect)
 
+# Embedded UI fonts (SIL Open Font License, see Resources/Fonts/OFL-*.txt)
+juce_add_binary_data(PotatoFonts SOURCES
+    Resources/Fonts/Nunito-Regular.ttf Resources/Fonts/Nunito-Bold.ttf
+    Resources/Fonts/Inter-Regular.ttf Resources/Fonts/Inter-Bold.ttf
+    Resources/Fonts/DMSans-Regular.ttf Resources/Fonts/DMSans-Bold.ttf
+    Resources/Fonts/Manrope-Regular.ttf Resources/Fonts/Manrope-Bold.ttf
+    Resources/Fonts/Quicksand-Regular.ttf Resources/Fonts/Quicksand-Bold.ttf)
+set_target_properties(PotatoFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 # Core DSP is plain C++ (no GUI), shared by the plugin and the test runner.
 add_library(potato_dsp STATIC
     Source/dsp/Loudness.cpp
@@ -90,6 +99,7 @@ endforeach()
 target_link_libraries(PotatoEQ
     PRIVATE
         potato_dsp
+        PotatoFonts
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC
@@ -114,6 +124,6 @@ if (POTATO_BUILD_HARNESS)
     target_compile_definitions(potato_harness PRIVATE
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_USE_MP3AUDIOFORMAT=1
         JUCE_USE_XRANDR=0 JUCE_USE_XINERAMA=0 JUCE_USE_XCURSOR=0 JUCE_USE_XINPUT=0 JUCE_USE_XRENDER=0 JUCE_USE_XSHM=0 JUCE_ALSA=0 JUCE_JACK=0)
-    target_link_libraries(potato_harness PRIVATE potato_dsp juce::juce_audio_utils juce::juce_dsp
+    target_link_libraries(potato_harness PRIVATE potato_dsp PotatoFonts juce::juce_audio_utils juce::juce_dsp
         juce::juce_recommended_config_flags)
 endif()

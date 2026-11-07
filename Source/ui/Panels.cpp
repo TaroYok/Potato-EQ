@@ -619,10 +619,13 @@ void AutoPanel::resized()
 }
 
 // ---------------------------------------------------------------- level meters
+// Clean slim capsules. dB mode: the bar follows the sample peak with instant attack and a smooth
+// 24 dB/s fall (same feel as the analyzer); a thin tick marks the held peak.
+// LUFS mode: the bar follows momentary loudness refreshed every 10 ms; the tick is short-term.
 LevelMeters::LevelMeters (PotatoEQProcessor& p) : proc (p)
 {
     setTooltip ("Input / output level (and limiter gain reduction). Units follow the LUFS / dB switch. Click to reset peaks and clip lights.");
-    startTimerHz (30);
+    startTimerHz (60);
 }
 
 LevelMeters::~LevelMeters() { stopTimer(); }
@@ -631,7 +634,18 @@ void LevelMeters::timerCallback()
 {
     in = proc.inMeter.get();
     out = proc.meter.get();
-    gr = jmax (proc.limiterReductionDb(), gr * 0.88f);
+    const bool db = ana::get (proc.apvts.state, ana::units, 0) == 1;
+    const float fall = 24.0f / 60.0f;   // dB per frame
+    auto follow = [&] (float& shown, float target)
+    {
+        if (target >= shown) shown = target;                       // instant rise
+        else shown = jmax (target, shown - fall);                  // smooth fall
+        shown = jmax (shown, -100.0f);
+    };
+    const float inPk = proc.inMeter.takeRecentPeakDb(), outPk = proc.meter.takeRecentPeakDb();
+    follow (inShown, db ? inPk : in.momentaryFast);
+    follow (outShown, db ? outPk : out.momentaryFast);
+    gr = jmax (proc.limiterReductionDb(), gr - fall);
     repaint();
 }
 
@@ -642,80 +656,100 @@ void LevelMeters::paint (Graphics& g)
     theme::drawGlassPanel (g, getLocalBounds().toFloat());
     const bool db = ana::get (proc.apvts.state, ana::units, 0) == 1;
     const bool lim = proc.apvts.getRawParameterValue (params::id::limiter)->load() > 0.5f;
-    auto area = getLocalBounds().toFloat().reduced (6.0f, 10.0f);
-    auto labels = area.removeFromBottom (14.0f);
-    area.removeFromTop (16.0f);                          // value readouts
-    const float lo = db ? -60.0f : -40.0f;               // bottom of the scale
+    auto area = getLocalBounds().toFloat().reduced (8.0f, 14.0f);
+    auto labels = area.removeFromBottom (30.0f);
+    const float lo = db ? -60.0f : -40.0f;
     auto yFor = [&] (float v) { return area.getBottom() - area.getHeight() * jlimit (0.0f, 1.0f, (v - lo) / -lo); };
 
-    // scale
-    auto scale = area.removeFromLeft (18.0f);
-    g.setFont (theme::font (9.0f));
-    const std::vector<float> marks = db ? std::vector<float> { 0, -6, -12, -24, -36, -48 } : std::vector<float> { 0, -10, -20, -30 };
+    // scale: a few quiet labels on the left
+    auto scale = area.removeFromLeft (20.0f);
+    g.setFont (theme::font (9.5f));
+    const std::vector<float> marks = db ? std::vector<float> { 0, -12, -24, -48 } : std::vector<float> { 0, -10, -20, -30 };
     for (float v : marks)
     {
-        g.setColour (theme::gridText);
-        g.drawText (String ((int) v), Rectangle<float> (scale.getX() - 2, yFor (v) - 5, 18, 10), Justification::centredRight);
+        g.setColour (theme::gridText.withAlpha (0.8f));
+        g.drawText (String ((int) v), Rectangle<float> (scale.getX() - 4, yFor (v) - 5, 20, 10), Justification::centredRight);
     }
-    area.removeFromLeft (3.0f);
 
     const int nBars = lim ? 3 : 2;
-    const float gap = 5.0f, w = (area.getWidth() - gap * (nBars - 1)) / nBars;
-    auto bar = [&] (int i) { return Rectangle<float> (area.getX() + i * (w + gap), area.getY(), w, area.getHeight()); };
-    auto readout = [&] (int i, const String& t, Colour c)
-    {
-        g.setColour (c); g.setFont (theme::font (8.5f, true));
-        g.drawFittedText (t, bar (i).withY (area.getY() - 15).withHeight (12).expanded (3, 0).toNearestInt(), Justification::centred, 1, 0.7f);
-    };
-    auto capsule = [&] (Rectangle<float> b)
-    {
-        g.setColour (Colours::black.withAlpha (0.45f)); g.fillRoundedRectangle (b, w * 0.5f);
-        g.setColour (Colours::white.withAlpha (0.08f)); g.drawRoundedRectangle (b, w * 0.5f, 1.0f);
-    };
-    // level colours: accent body, warming up toward the top of the scale
-    ColourGradient grad (theme::bad, 0, yFor (0), theme::accent.darker (0.4f), 0, area.getBottom(), false);
-    grad.addColour (jlimit (0.0, 1.0, (double) ((yFor (db ? -6.0f : -9.0f) - yFor (0)) / area.getHeight())), theme::warn);
-    grad.addColour (jlimit (0.0, 1.0, (double) ((yFor (db ? -18.0f : -18.0f) - yFor (0)) / area.getHeight())), theme::accent);
-
-    auto levelBar = [&] (int i, const arc::LoudnessMeter::Readings& m, const String& name)
+    const float slot = area.getWidth() / nBars, w = jmin (9.0f, slot - 6.0f);
+    auto bar = [&] (int i) { return Rectangle<float> (area.getX() + slot * i + (slot - w) * 0.5f, area.getY(), w, area.getHeight()); };
+    auto caption = [&] (int i, const String& name, const String& value, Colour vc)
     {
         const auto b = bar (i);
-        capsule (b);
-        const float body = db ? m.rmsDb : m.momentary, tick = db ? m.peakHoldDb : m.shortTerm;
-        const float yb = yFor (body);
-        if (yb < b.getBottom() - 1)
-        {
-            g.setGradientFill (grad);
-            g.fillRoundedRectangle (b.withTop (yb).reduced (1.5f, 0), (w - 3) * 0.5f);
-            g.setColour (Colours::white.withAlpha (0.22f));   // gloss stripe
-            g.fillRoundedRectangle (b.withTop (yb).reduced (1.5f, 0).withWidth ((w - 3) * 0.4f), 2.0f);
-        }
-        if (tick > lo) { g.setColour (Colours::white.withAlpha (0.9f)); g.fillRect (b.getX() + 1.5f, yFor (tick) - 1.0f, w - 3, 2.0f); }
-        if (m.clipped) { g.setColour (theme::bad); g.fillEllipse (Rectangle<float> (6, 6).withCentre ({ b.getCentreX(), b.getY() + 5 })); }
-        readout (i, db ? (tick <= -99 ? String ("-inf") : String (roundToInt (tick))) : (m.shortTerm <= -69 ? String ("--") : String (roundToInt (m.shortTerm))), m.clipped ? theme::bad : theme::textDim);
+        auto r = Rectangle<float> (b.getCentreX() - slot * 0.5f, labels.getY() + 4, slot, 12);
         g.setColour (theme::textDim); g.setFont (theme::font (9.5f, true));
-        g.drawText (name, Rectangle<float> (b.getX() - 4, labels.getY(), w + 8, labels.getHeight()), Justification::centred);
+        g.drawText (name, r, Justification::centred);
+        g.setColour (vc); g.setFont (theme::font (9.5f));
+        g.drawText (value, r.translated (0, 12), Justification::centred);
     };
-    levelBar (0, in, "IN");
-    levelBar (1, out, "OUT");
+    auto track = [&] (Rectangle<float> b)
+    {
+        g.setColour (Colours::black.withAlpha (0.4f)); g.fillRoundedRectangle (b, w * 0.5f);
+    };
+    // colour by level: accent body, warming up near the top of the scale
+    const float warnAt = db ? -6.0f : -9.0f;
+    ColourGradient grad (theme::bad, 0, yFor (0), theme::accent.darker (0.35f), 0, area.getBottom(), false);
+    grad.addColour (jlimit (0.0, 1.0, (double) ((yFor (warnAt) - yFor (0)) / area.getHeight())), theme::warn);
+    grad.addColour (jlimit (0.0, 1.0, (double) ((yFor (-18.0f) - yFor (0)) / area.getHeight())), theme::accent);
+
+    auto levelBar = [&] (int i, float level, float tick, bool clipped)
+    {
+        const auto b = bar (i);
+        track (b);
+        const float y = yFor (level);
+        if (y < b.getBottom() - 0.5f)
+        {
+            const auto fillR = b.withTop (jmin (y, b.getBottom() - w));
+            g.setGradientFill (grad);
+            g.fillRoundedRectangle (fillR, w * 0.5f);
+            g.setColour (Colours::white.withAlpha (0.35f));   // soft glow at the top of the bar
+            g.fillEllipse (Rectangle<float> (w, w * 0.6f).withCentre ({ b.getCentreX(), fillR.getY() + w * 0.35f }));
+        }
+        if (tick > lo) { g.setColour (theme::text.withAlpha (0.85f)); g.fillRoundedRectangle (Rectangle<float> (w + 4, 2.0f).withCentre ({ b.getCentreX(), yFor (tick) }), 1.0f); }
+        if (clipped) { g.setColour (theme::bad); g.fillEllipse (Rectangle<float> (5, 5).withCentre ({ b.getCentreX(), b.getY() - 6 })); }
+    };
+    auto valueText = [] (float v, bool dbMode) { return v <= (dbMode ? -99.0f : -69.0f) ? String ("-") : String (v, 1); };
+
+    levelBar (0, inShown, db ? in.peakHoldDb : in.shortTerm, in.clipped);
+    levelBar (1, outShown, db ? out.peakHoldDb : out.shortTerm, out.clipped);
+    caption (0, "IN", valueText (db ? in.peakHoldDb : in.shortTerm, db), in.clipped ? theme::bad : theme::textDim);
+    caption (1, "OUT", valueText (db ? out.peakHoldDb : out.shortTerm, db), out.clipped ? theme::bad : theme::textDim);
     if (! db)
     {   // loudness target across the bars
         const float yt = yFor (proc.targetLufs());
-        g.setColour (theme::accent2.withAlpha (0.85f));
-        g.drawLine (area.getX() - 2, yt, area.getRight(), yt, 1.2f);
+        g.setColour (theme::accent2.withAlpha (0.8f));
+        g.fillRoundedRectangle (Rectangle<float> (bar (0).getX() - 3, yt - 0.75f, bar (1).getRight() - bar (0).getX() + 6, 1.5f), 0.75f);
     }
     if (lim)
     {   // gain reduction grows down from the top, 0..-12 dB
         const auto b = bar (2);
-        capsule (b);
+        track (b);
         const float h = b.getHeight() * jlimit (0.0f, 1.0f, gr / 12.0f);
         if (h > 0.5f)
         {
-            g.setGradientFill (ColourGradient (theme::autoCol.brighter (0.3f), 0, b.getY(), theme::autoCol.darker (0.3f), 0, b.getY() + h, false));
-            g.fillRoundedRectangle (b.withHeight (h).reduced (1.5f, 0), (w - 3) * 0.5f);
+            g.setColour (theme::autoCol);
+            g.fillRoundedRectangle (b.withHeight (jmax (h, w)), w * 0.5f);
         }
-        readout (2, gr < 0.05f ? String ("0") : String (-gr, 1), theme::autoCol);
-        g.setColour (theme::textDim); g.setFont (theme::font (9.5f, true));
-        g.drawText ("GR", Rectangle<float> (b.getX() - 4, labels.getY(), w + 8, labels.getHeight()), Justification::centred);
+        caption (2, "GR", gr < 0.05f ? String ("0.0") : String (-gr, 1), theme::autoCol);
     }
+}
+
+// ---------------------------------------------------------------- interface fonts
+#include "BinaryData.h"
+void theme::setUiFont (int index)
+{
+    struct Pair { const char* r; int rn; const char* b; int bn; };
+    const Pair fonts[] = {
+        { nullptr, 0, nullptr, 0 },
+        { BinaryData::NunitoRegular_ttf, BinaryData::NunitoRegular_ttfSize, BinaryData::NunitoBold_ttf, BinaryData::NunitoBold_ttfSize },
+        { BinaryData::InterRegular_ttf, BinaryData::InterRegular_ttfSize, BinaryData::InterBold_ttf, BinaryData::InterBold_ttfSize },
+        { BinaryData::DMSansRegular_ttf, BinaryData::DMSansRegular_ttfSize, BinaryData::DMSansBold_ttf, BinaryData::DMSansBold_ttfSize },
+        { BinaryData::ManropeRegular_ttf, BinaryData::ManropeRegular_ttfSize, BinaryData::ManropeBold_ttf, BinaryData::ManropeBold_ttfSize },
+        { BinaryData::QuicksandRegular_ttf, BinaryData::QuicksandRegular_ttfSize, BinaryData::QuicksandBold_ttf, BinaryData::QuicksandBold_ttfSize } };
+    const auto& f = fonts[jlimit (0, (int) std::size (fonts) - 1, index)];
+    uiRegular() = f.r != nullptr ? Typeface::createSystemTypefaceFor (f.r, (size_t) f.rn) : nullptr;
+    uiBold() = f.b != nullptr ? Typeface::createSystemTypefaceFor (f.b, (size_t) f.bn) : nullptr;
+    const float scales[] = { 1.0f, 1.16f, 1.06f, 1.14f, 1.10f, 1.16f };   // match the classic font's visual size
+    uiFontScale() = scales[jlimit (0, (int) std::size (scales) - 1, index)];
 }

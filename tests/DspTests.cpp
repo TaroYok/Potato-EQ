@@ -117,6 +117,7 @@ int main()
         near ("1 kHz stereo sine at -23 dBFS: integrated", r.integrated, -23.0, 0.1);
         near ("  momentary", r.momentary, -23.0, 0.1);
         near ("  short-term", r.shortTerm, -23.0, 0.1);
+        near ("  fast momentary (10 ms updates) agrees", r.momentaryFast, -23.0, 0.1);
     }
     {
         LoudnessMeter m; m.prepare (fs); runMeter (m, -20, 20); runMeter (m, -30, 20);

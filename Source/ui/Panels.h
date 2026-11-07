@@ -20,6 +20,7 @@ public:
     juce::Font getComboBoxFont (juce::ComboBox&) override { return theme::font (12.5f); }
     juce::Font getTextButtonFont (juce::TextButton&, int) override { return theme::font (12.5f, true); }
     juce::Font getLabelFont (juce::Label&) override { return theme::font (12.0f); }
+    juce::Font getPopupMenuFont() override { return theme::font (14.0f); }
 };
 
 // Rotary knob with a caption above and a value box below.
@@ -102,7 +103,7 @@ private:
     void timerCallback() override;
     PotatoEQProcessor& proc;
     arc::LoudnessMeter::Readings in, out;
-    float gr = 0;
+    float gr = 0, inShown = -100, outShown = -100;
 };
 
 class AutoPanel : public juce::Component, private juce::Timer

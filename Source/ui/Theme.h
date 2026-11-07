@@ -39,10 +39,22 @@ inline Colour bandColour (int band)
     return Colour (c[band % 12]);
 }
 
+// ---- interface font (embedded open-licence fonts, chosen in Display > Font)
+inline juce::Typeface::Ptr& uiRegular() { static juce::Typeface::Ptr p; return p; }
+inline juce::Typeface::Ptr& uiBold()    { static juce::Typeface::Ptr p; return p; }
+inline float& uiFontScale()             { static float k = 1.0f; return k; }   // evens out each font's built-in spacing
+inline const juce::StringArray fontNames { "Classic (system)", "Nunito (soft, rounded)", "Inter (clean, very readable)",
+                                           "DM Sans (soft geometric)", "Manrope (modern)", "Quicksand (softest)" };
+void setUiFont (int index);   // Panels.cpp (needs the embedded font data)
+
 inline juce::Font font (float h, bool bold = false)
 {
+    if (auto& tf = bold ? uiBold() : uiRegular())
+        return juce::Font (juce::FontOptions (tf).withHeight (h * uiFontScale()));
     return juce::Font (juce::FontOptions (h, bold ? juce::Font::bold : juce::Font::plain));
 }
+// same size and weight, in the chosen interface font
+inline juce::Font withFace (const juce::Font& f) { return font (f.getHeight(), f.isBold()); }
 
 // Rounded glass panel: translucent body, soft top sheen, thin bright rim.
 inline void drawGlassPanel (juce::Graphics& g, juce::Rectangle<float> r, float rad = radius, Colour tint = panel)
@@ -113,6 +125,29 @@ inline const std::array<Scheme, 6>& schemes()
     return s;
 }
 
+// Custom scheme: the user picks these; everything else is derived from them.
+inline const juce::StringArray customSlotNames { "Background", "Panels", "Analyzer background", "Accent", "Second accent",
+                                                 "Title bar", "Text", "Title text", "Rims / chrome" };
+constexpr int kCustomSlots = 9;
+
+inline std::array<Colour, kCustomSlots> slotsFromScheme (int index)
+{
+    const auto& c = schemes()[(size_t) juce::jlimit (0, (int) schemes().size() - 1, index)];
+    return { Colour (c.bgTop), Colour (c.panel), Colour (c.plotBg), Colour (c.accent), Colour (c.accent2),
+             Colour (c.navTop).interpolatedWith (Colour (c.navBottom), 0.5f), Colour (c.text), Colour (c.navText), Colour (c.chrome) };
+}
+
+inline void applyCustom (const std::array<Colour, kCustomSlots>& k)
+{
+    bgTop = k[0]; bgBottom = k[0].darker (0.85f); bg = k[0].darker (0.5f);
+    panel = k[1]; panelHi = k[1].brighter (0.35f);
+    plotBg = k[2]; grid = k[2].interpolatedWith (k[6], 0.12f); gridText = k[6].interpolatedWith (k[2], 0.45f);
+    accent = k[3]; accent2 = k[4];
+    navTop = k[5].brighter (0.35f); navBottom = k[5].darker (0.3f);
+    text = k[6]; textDim = k[6].interpolatedWith (k[1], 0.35f);
+    navText = k[7]; chrome = k[8];
+}
+
 inline void applyScheme (int index)
 {
     const auto& c = schemes()[(size_t) juce::jlimit (0, (int) schemes().size() - 1, index)];
@@ -129,7 +164,8 @@ namespace ana
                                   speed ("anaSpeed"), tilt ("anaTilt"), range ("anaRange"),
                                   showSc ("anaShowSc"), collide ("anaCollide"), smoothing ("anaSmooth"), noteGrid ("anaNoteGrid"),
                                   view ("anaView"), fill ("anaFill"), palette ("anaPalette"), customLight ("anaLight"), customDark ("anaDark"),
-                                  scheme ("uiScheme"), units ("uiUnits");
+                                  scheme ("uiScheme"), units ("uiUnits"), uiFont ("uiFont");
+    inline juce::Identifier customSlot (int i) { return juce::Identifier ("uiC" + juce::String (i)); }
     inline const juce::StringArray unitNames { "LUFS", "dB (dBFS)", "Both" };
     inline const juce::StringArray smoothingNames { "Off (1/48 oct)", "Light (1/24 oct)", "Medium (1/12 oct)", "Heavy (1/6 oct)", "Very heavy (1/3 oct)" };
     inline const juce::StringArray resolutionNames { "Low", "Medium", "High", "Maximum" };   // FFT 2k/4k/8k/16k
@@ -182,6 +218,16 @@ inline Palette paletteFrom (const juce::ValueTree& s)
     const Colour dark ((juce::uint32) (juce::int64) s.getProperty (ana::customDark, (juce::int64) 0xff081a3a));
     const Colour m = dark.interpolatedWith (light, 0.5f);
     return { dark, m.withSaturation (juce::jmin (1.0f, m.getSaturation() * 1.4f + 0.1f)), light };
+}
+// Scheme from the plugin state: a preset, or the custom colours.
+inline void applySchemeFromState (const juce::ValueTree& st)
+{
+    const int idx = ana::get (st, ana::scheme, 0);
+    if (idx < (int) schemes().size()) { applyScheme (idx); return; }
+    auto k = slotsFromScheme (0);
+    for (int i = 0; i < kCustomSlots; ++i)
+        if (st.hasProperty (ana::customSlot (i))) k[(size_t) i] = Colour ((juce::uint32) (juce::int64) st.getProperty (ana::customSlot (i)));
+    applyCustom (k);
 }
 } // namespace theme
 namespace ana = theme::ana;

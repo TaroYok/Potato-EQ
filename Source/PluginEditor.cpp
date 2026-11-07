@@ -7,7 +7,8 @@ using namespace juce;
 PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
     : AudioProcessorEditor (&p), proc (p), display (p), bandPanel (p), loudness (p), autoPanel (p)
 {
-    theme::applyScheme (ana::get (proc.apvts.state, ana::scheme, 0));
+    theme::applySchemeFromState (proc.apvts.state);
+    theme::setUiFont (ana::get (proc.apvts.state, ana::uiFont, 0));
     lnf.refreshColours();
     setLookAndFeel (&lnf);
     auto& s = proc.apvts;
@@ -103,9 +104,17 @@ void PotatoEQEditor::showAnalyzerMenu()
     {
         const int cur = ana::get (st, ana::scheme, 0);
         for (int i = 0; i < (int) theme::schemes().size(); ++i) sch.addItem (950 + i, theme::schemes()[(size_t) i].name, true, cur == i);
+        sch.addSeparator();
+        sch.addItem (990, "Custom colours...", true, cur >= (int) theme::schemes().size());
     }
     m.addSectionHeader ("Look");
     m.addSubMenu ("Colour scheme", sch);
+    {
+        PopupMenu fm;
+        const int cur = ana::get (st, ana::uiFont, 0);
+        for (int i = 0; i < theme::fontNames.size(); ++i) fm.addItem (1100 + i, theme::fontNames[i], true, cur == i);
+        m.addSubMenu ("Font", fm);
+    }
     {
         PopupMenu un;
         const int cur = ana::get (st, ana::units, 0);
@@ -133,7 +142,9 @@ void PotatoEQEditor::showAnalyzerMenu()
     {
         if (safe == nullptr || r == 0) return;
         auto& s = safe->proc.apvts.state;
+        if (r >= 1100) { safe->setUiFont (r - 1100); return; }
         if (r >= 1000) { s.setProperty (ana::units, r - 1000, nullptr); return; }
+        if (r == 990) { safe->showSchemeDialog(); return; }
         if (r >= 950) { safe->setScheme (r - 950); return; }
         if (r == 899) { safe->showColourDialog(); return; }
         if (r >= 800) { s.setProperty (ana::palette, r - 800, nullptr); return; }
@@ -233,6 +244,93 @@ void PotatoEQEditor::setScheme (int i)
     lnf.refreshColours();
     sendLookAndFeelChange();
     repaint();
+}
+
+void PotatoEQEditor::refreshLook()
+{
+    theme::applySchemeFromState (proc.apvts.state);
+    lnf.refreshColours();
+    sendLookAndFeelChange();
+    repaint();
+}
+
+void PotatoEQEditor::setUiFont (int i)
+{
+    proc.apvts.state.setProperty (ana::uiFont, i, nullptr);
+    theme::setUiFont (i);
+    sendLookAndFeelChange();
+    resized();
+    repaint();
+}
+
+// Custom interface colours: pick a part of the interface on the left, its colour on the right.
+class SchemeDialog : public Component, private ChangeListener
+{
+public:
+    SchemeDialog (ValueTree st, std::function<void()> changed) : state (st), onChanged (std::move (changed))
+    {
+        // start from whatever is on screen right now
+        const int cur = ana::get (state, ana::scheme, 0);
+        if (cur < (int) theme::schemes().size())
+        {
+            const auto k = theme::slotsFromScheme (cur);
+            for (int i = 0; i < theme::kCustomSlots; ++i) state.setProperty (ana::customSlot (i), (int64) k[(size_t) i].getARGB(), nullptr);
+            state.setProperty (ana::scheme, (int) theme::schemes().size(), nullptr);
+            onChanged();
+        }
+        for (int i = 0; i < theme::kCustomSlots; ++i)
+        {
+            auto* b = slots.add (new TextButton (theme::customSlotNames[i]));
+            b->setClickingTogglesState (true);
+            b->setRadioGroupId (77);
+            b->onClick = [this, i] { select (i); };
+            addAndMakeVisible (b);
+        }
+        picker.setColour (ColourSelector::backgroundColourId, Colours::transparentBlack);
+        picker.addChangeListener (this);
+        addAndMakeVisible (picker);
+        setSize (470, 300);
+        slots[0]->setToggleState (true, dontSendNotification);
+        select (0);
+    }
+    void paint (Graphics& g) override
+    {
+        for (int i = 0; i < slots.size(); ++i)
+        {
+            auto sw = slots[i]->getBounds().toFloat().removeFromRight (18.0f).reduced (3.0f, 5.0f);
+            g.setColour (colourOf (i)); g.fillRoundedRectangle (sw, 3.0f);
+            g.setColour (Colours::white.withAlpha (0.4f)); g.drawRoundedRectangle (sw, 3.0f, 1.0f);
+        }
+    }
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (8);
+        auto left = r.removeFromLeft (180);
+        for (auto* b : slots) { b->setBounds (left.removeFromTop (28).withTrimmedRight (20)); left.removeFromTop (3); }
+        picker.setBounds (r.withTrimmedLeft (8));
+    }
+
+private:
+    Colour colourOf (int i) const { return Colour ((uint32) (int64) state.getProperty (ana::customSlot (i), (int64) 0xff808080)); }
+    void select (int i) { current = i; picker.setCurrentColour (colourOf (i), dontSendNotification); repaint(); }
+    void changeListenerCallback (ChangeBroadcaster*) override
+    {
+        state.setProperty (ana::customSlot (current), (int64) picker.getCurrentColour().getARGB(), nullptr);
+        onChanged();
+        repaint();
+    }
+    ValueTree state;
+    std::function<void()> onChanged;
+    OwnedArray<TextButton> slots;
+    ColourSelector picker { ColourSelector::showColourspace | ColourSelector::showColourAtTop | ColourSelector::showSliders };
+    int current = 0;
+};
+
+void PotatoEQEditor::showSchemeDialog()
+{
+    SafePointer<PotatoEQEditor> safe (this);
+    CallOutBox::launchAsynchronously (std::make_unique<SchemeDialog> (proc.apvts.state, [safe] { if (safe != nullptr) safe->refreshLook(); }),
+                                      anaMenu.getScreenBounds(), nullptr);
 }
 
 void PotatoEQEditor::showColourDialog()
