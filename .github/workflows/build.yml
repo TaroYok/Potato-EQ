@@ -114,12 +114,23 @@ jobs:
           path: installers
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Every successful build of main is published as a GitHub Release, so the plugin is one click away.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write   # only the release job may publish
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: CMakeLists.txt
+      - name: Release name
+        id: rel
+        run: |
+          v=$(sed -n 's/^project(PotatoEQ VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then t="${GITHUB_REF_NAME}"; else t="v${v}-build.${GITHUB_RUN_NUMBER}"; fi
+          echo "tag=$t" >> "$GITHUB_OUTPUT"
+          echo "name=Potato EQ ${t#v}" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
@@ -131,6 +142,15 @@ jobs:
           ls -la; cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
+          tag_name: ${{ steps.rel.outputs.tag }}
+          name: ${{ steps.rel.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            **Windows (FL Studio, Ableton, ...):** download `PotatoEQ-Windows.zip`, unzip it, and copy the
+            `Potato EQ.vst3` folder into `C:\Program Files\Common Files\VST3`. Then rescan plugins in your DAW.
+            **Mac:** `PotatoEQ-macOS.zip` (VST3 + AU), see INSTALL.txt inside.
+            Installers (unsigned) and SHA256 checksums are attached too.
           files: |
             artifacts/*.zip
             artifacts/*.exe
