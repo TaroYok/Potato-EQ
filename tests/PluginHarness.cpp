@@ -212,6 +212,25 @@ int main (int argc, char** argv)
     for (int i = 0; i < 40 && ! q->autoSnapshot().result.valid; ++i) Thread::sleep (50);
     check (q->autoSnapshot().result.valid, "learned spectrum restored with the project", q->autoSnapshot().result.valid, 1);
 
+    {   // a damaged / malicious project must not inject garbage into the learned spectrum
+        auto xml = AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize());
+        if (auto* learned = xml->getChildByName ("Learned"))
+        {
+            String bad; for (int i = 0; i < arc::kSpecBins; ++i) bad << (i == 5 ? "nan " : "1e300 ");
+            learned->setAttribute ("accum", bad.trim());
+        }
+        MemoryBlock badState; AudioProcessor::copyXmlToBinary (*xml, badState);
+        auto z = std::make_unique<PotatoEQProcessor>();
+        z->setPlayConfigDetails (2, 2, 48000, 512);
+        z->setStateInformation (badState.getData(), (int) badState.getSize());
+        z->prepareToPlay (48000, 512);
+        Thread::sleep (300);
+        check (! z->autoSnapshot().result.valid, "corrupt learned data in a project is rejected", z->autoSnapshot().result.valid, 0);
+        check (z->bandSettings (2).used, "...while the rest of the project still loads", z->bandSettings (2).used, 1);
+        z->setStateInformation ("garbage", 7);   // random bytes must not crash
+        check (true, "random bytes as plugin state don't crash", 1, 1);
+    }
+
     std::puts ("-- commit auto to bands --");
     const int placed = p->commitAutoToBands();
     check (placed >= 2 && placed <= 8, "auto curve turned into editable bands", placed, 6);

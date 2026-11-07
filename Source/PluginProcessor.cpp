@@ -595,12 +595,21 @@ void PotatoEQProcessor::setStateInformation (const void* data, int size)
     auto learn = state.getChildWithName ("Learned");
     if (learn.isValid())
     {
-        auto parts = StringArray::fromTokens (learn["accum"].toString(), " ", "");
+        // project files can come from anywhere: only accept well-formed, finite, non-negative data
+        auto parts = StringArray::fromTokens (learn["accum"].toString().substring (0, 4096), " ", "");
+        std::array<double, arc::kSpecBins> acc {};
+        bool ok = parts.size() == arc::kSpecBins;
+        for (int i = 0; ok && i < arc::kSpecBins; ++i)
+        {
+            acc[(size_t) i] = parts[i].getDoubleValue();
+            ok = std::isfinite (acc[(size_t) i]) && acc[(size_t) i] >= 0.0 && acc[(size_t) i] < 1e30;
+        }
+        const double frames = (double) learn["frames"];
+        ok = ok && std::isfinite (frames) && frames >= 0.0 && frames < 1e9;
         const SpinLock::ScopedLockType lock (learnLock);
-        if (parts.size() == arc::kSpecBins)
-            for (int i = 0; i < arc::kSpecBins; ++i) learnAccum[(size_t) i] = parts[i].getDoubleValue();
-        learnFrames = (double) learn["frames"];
-        learnDone = (bool) learn["done"];
+        learnAccum = ok ? acc : std::array<double, arc::kSpecBins> {};
+        learnFrames = ok ? frames : 0.0;
+        learnDone = ok && (bool) learn["done"];
         learnProgress = learnDone ? 1.0f : 0.0f;
         lastProfile = -1;   // forces the curve to be rebuilt from the saved spectrum
     }

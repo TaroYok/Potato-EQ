@@ -13,8 +13,12 @@ if (JUCE_DIR)
     add_subdirectory(${JUCE_DIR} juce EXCLUDE_FROM_ALL)
 else()
     include(FetchContent)
+    # Pinned to an exact commit: the hash identifies the source contents, so a changed or
+    # tampered upstream can't silently end up in the build.
     FetchContent_Declare(juce   # JUCE 9.0.5
-        URL https://github.com/juce-framework/JUCE/archive/d60b7a78030661574a615b586d9325ba7a7fa7dd.tar.gz)
+        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+        GIT_TAG d60b7a78030661574a615b586d9325ba7a7fa7dd
+        GIT_SHALLOW FALSE)
     FetchContent_MakeAvailable(juce)
 endif()
 
@@ -65,6 +69,22 @@ if (POTATO_HEADLESS_LINUX)
     target_compile_definitions(PotatoEQ PUBLIC
         JUCE_USE_XRANDR=0 JUCE_USE_XINERAMA=0 JUCE_USE_XCURSOR=0 JUCE_USE_XINPUT=0 JUCE_USE_XRENDER=0 JUCE_USE_XSHM=0 JUCE_ALSA=0 JUCE_JACK=0)
 endif()
+
+# Exploit-mitigation flags for the shipped binaries
+foreach (t PotatoEQ PotatoEQ_VST3 PotatoEQ_AU PotatoEQ_Standalone)
+    if (TARGET ${t})
+        if (MSVC)
+            target_compile_options(${t} PRIVATE /guard:cf)            # Control Flow Guard
+            target_link_options(${t} PRIVATE /guard:cf /DYNAMICBASE /NXCOMPAT)
+        else()
+            target_compile_options(${t} PRIVATE -fstack-protector-strong
+                $<$<CONFIG:Release>:-D_FORTIFY_SOURCE=2>)
+            if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+                target_link_options(${t} PRIVATE -Wl,-z,relro,-z,now -Wl,-z,noexecstack)
+            endif()
+        endif()
+    endif()
+endforeach()
 
 target_link_libraries(PotatoEQ
     PRIVATE
