@@ -4,6 +4,7 @@
 #include "Params.h"
 #include "dsp/Loudness.h"
 #include "dsp/Limiter.h"
+#include "SpectrumShare.h"
 
 // Lock-free mono sample FIFO from the audio thread to the analyzer display.
 class SampleFifo
@@ -55,6 +56,8 @@ public:
     const juce::String getProgramName (int) override;
     void changeProgramName (int, const juce::String&) override {}
     void getStateInformation (juce::MemoryBlock&) override;
+    void updateTrackProperties (const TrackProperties&) override;
+    int shareId() const { return shareIdent; }
     void setStateInformation (const void*, int) override;
 
     // ---- used by the editor (message thread) ----
@@ -134,6 +137,14 @@ private:
     juce::int64 firHash = 0;
     std::atomic<bool> meterResetRequest { false };
     int lastMode = -1;
+    // cross-track spectrum sharing (collision detection)
+    int shareIdent = 0;
+    SampleFifo shareFifo;
+    std::vector<float> shareRing, shareWork, shareWindow;
+    int shareRingPos = 0;
+    std::array<float, share::kBands> shareDb {};
+    juce::dsp::FFT shareFft { 12 };
+    void updateShare();
     int currentPreset = 0;
     float levelTrim = 0;
     double lastTweakHash = -1;
