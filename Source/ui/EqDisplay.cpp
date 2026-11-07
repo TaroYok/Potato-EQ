@@ -525,7 +525,7 @@ void EqDisplay::drawStyledSpectrum (Graphics& g, const Spectrum& s, const theme:
 
     if (style == 3)
     {   // slices: Riemann-sum bars, each coloured by its own level
-        const float w = 3.5f, gap = 2.0f;
+        const float w = 1.3f, gap = 2.2f;   // hairline slices
         for (float x = a.getX(); x < a.getRight(); x += w + gap)
         {
             const int c0 = (int) ((x - a.getX()) / kColStep), c1 = jmin ((int) s.display.size() - 1, (int) ((x + w - a.getX()) / kColStep));
@@ -535,9 +535,9 @@ void EqDisplay::drawStyledSpectrum (Graphics& g, const Spectrum& s, const theme:
             if (y >= a.getBottom() - 1) continue;
             const Rectangle<float> bar (x, y, w, a.getBottom() - y);
             g.setGradientFill (ColourGradient (pal.at (t).withAlpha (0.95f), 0, y, pal.at (t * 0.35f).withAlpha (0.35f), 0, a.getBottom(), false));
-            g.fillRoundedRectangle (bar, 1.75f);
-            g.setColour (Colours::white.withAlpha (0.3f * t));
-            g.fillRoundedRectangle (bar.withHeight (jmin (2.0f, bar.getHeight())), 1.0f);
+            g.fillRect (bar);
+            g.setColour (pal.light.withAlpha (0.55f * t));   // bright tip
+            g.fillRect (bar.withHeight (jmin (2.0f, bar.getHeight())));
         }
         return;
     }
