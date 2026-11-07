@@ -74,6 +74,8 @@ private:
     juce::ComboBox target;
     std::unique_ptr<APVTS::ComboBoxAttachment> aTarget;
     juce::TextButton match { "Match target" }, reset { "Reset" };
+    juce::TextButton unitLufs { "LUFS" }, unitDb { "dB" };   // shared LUFS / dB switch
+    int lastUnits = -1;
     juce::ToggleButton autoLevel { "Auto level to target" }, limiterOn { "Limiter" };
     juce::Slider ceiling, custom;
     juce::Label ceilingL, customL;
@@ -84,6 +86,23 @@ private:
     arc::LoudnessMeter::Readings r;
     std::vector<float> history;   // momentary loudness, 10 per second
     int tick = 0;
+};
+
+// Slim In / Out (and limiter gain-reduction) bar meters. Units follow the shared LUFS / dB setting.
+// Click to reset peaks and clip lights.
+class LevelMeters : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit LevelMeters (PotatoEQProcessor&);
+    ~LevelMeters() override;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+
+private:
+    void timerCallback() override;
+    PotatoEQProcessor& proc;
+    arc::LoudnessMeter::Readings in, out;
+    float gr = 0;
 };
 
 class AutoPanel : public juce::Component, private juce::Timer

@@ -2,6 +2,7 @@
 #include "dsp/AutoEq.h"
 #include "dsp/Loudness.h"
 #include <cstdio>
+#include <functional>
 #include <random>
 
 using namespace arc;
@@ -133,6 +134,43 @@ int main()
         for (size_t i = 0; i < x.size(); ++i) x[i] = (float) (a * std::sin (2 * kPi * 1000 * (double) i / 44100));
         const float* ch[2] = { x.data(), x.data() }; m.process (ch, 2, (int) x.size());
         near ("same at 44.1 kHz", m.get().integrated, -23.0, 0.1);
+    }
+
+    std::puts ("-- dBFS meters --");
+    {
+        LoudnessMeter m; m.prepare (fs);
+        auto feed = [&] (std::function<float (long)> gen, double secs)
+        {
+            static long t2 = 0;
+            const int n = (int) (secs * fs); std::vector<float> x (512);
+            for (int off = 0; off < n; off += 512)
+            {
+                const int k = std::min (512, n - off);
+                for (int i = 0; i < k; ++i) x[(size_t) i] = gen (t2++);
+                const float* ch[2] = { x.data(), x.data() };
+                m.process (ch, 2, k);
+            }
+        };
+        feed ([&] (long t) { return (float) (0.1 * std::sin (2 * kPi * 1000 * t / fs)); }, 20);   // long enough for the 3 s average to settle
+        near ("sine at -20 dBFS peak: RMS (300 ms)", m.get().rmsDb, -23.01, 0.05);
+        near ("  RMS (3 s)", m.get().rmsSlowDb, -23.01, 0.1);
+        near ("  peak hold", m.get().peakHoldDb, -20.0, 0.05);
+        check (! m.get().clipped, "  no clip light", m.get().clipped, 0);
+        LoudnessMeter q; q.prepare (fs);
+        { // square wave: crest factor 0 dB
+            const int n = (int) (4 * fs); std::vector<float> x ((size_t) n);
+            for (int i = 0; i < n; ++i) x[(size_t) i] = ((i / 24) % 2) ? 0.5f : -0.5f;
+            const float* ch[2] = { x.data(), x.data() }; q.process (ch, 2, n);
+        }
+        near ("square wave: crest factor (peak - RMS)", q.get().peakHoldDb - q.get().rmsDb, 0.0, 0.05);
+        // hold, then fall
+        feed ([] (long) { return 0.0f; }, 2.0);
+        near ("peak held for 3 s after the signal stops", m.get().peakHoldDb, -20.0, 0.05);
+        feed ([] (long) { return 0.0f; }, 2.0);
+        near ("then falls at 20 dB/s (1 s after the hold)", m.get().peakHoldDb, -40.0, 1.0);
+        LoudnessMeter c; c.prepare (fs);
+        { std::vector<float> x (480, 1.0f); const float* ch[2] = { x.data(), x.data() }; c.process (ch, 2, 480); }
+        check (c.get().clipped, "full-scale sample lights the clip indicator", c.get().clipped, 1);
     }
 
     std::puts ("-- auto EQ --");

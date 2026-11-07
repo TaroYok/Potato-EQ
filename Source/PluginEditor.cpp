@@ -53,6 +53,7 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
                      (Component*) &display, (Component*) &loudness, (Component*) &autoPanel })
         addAndMakeVisible (*c);
     addAndMakeVisible (bandPanel);   // fixed box under the display
+    addAndMakeVisible (meters);
 
     display.onSelectionChanged = [this] (int b) { bandPanel.setBand (b); };
     bandPanel.onDelete = [this] (int b)
@@ -105,6 +106,12 @@ void PotatoEQEditor::showAnalyzerMenu()
     }
     m.addSectionHeader ("Look");
     m.addSubMenu ("Colour scheme", sch);
+    {
+        PopupMenu un;
+        const int cur = ana::get (st, ana::units, 0);
+        for (int i = 0; i < ana::unitNames.size(); ++i) un.addItem (1000 + i, ana::unitNames[i], true, cur == i);
+        m.addSubMenu ("Meter units", un);
+    }
     m.addSubMenu ("View", vw);
     m.addSubMenu ("Fill style", fl);
     m.addSubMenu ("Colours", col);
@@ -126,6 +133,7 @@ void PotatoEQEditor::showAnalyzerMenu()
     {
         if (safe == nullptr || r == 0) return;
         auto& s = safe->proc.apvts.state;
+        if (r >= 1000) { s.setProperty (ana::units, r - 1000, nullptr); return; }
         if (r >= 950) { safe->setScheme (r - 950); return; }
         if (r == 899) { safe->showColourDialog(); return; }
         if (r >= 800) { s.setProperty (ana::palette, r - 800, nullptr); return; }
@@ -292,5 +300,7 @@ void PotatoEQEditor::resized()
     autoPanel.setBounds (side);
     bandPanel.setBounds (r.removeFromBottom (BandPanel::kHeight + 8));
     r.removeFromBottom (8);
+    meters.setBounds (r.removeFromRight (92));
+    r.removeFromRight (8);
     display.setBounds (r);
 }

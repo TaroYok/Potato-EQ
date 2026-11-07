@@ -66,6 +66,8 @@ void LoudnessMeter::reset()
     intTotal = stTotal = 0;
     for (auto& h : tpHist) h.fill (0);
     tpPos = 0; tpMax = spMax = 0;
+    rmsFast = rmsSlow = 0; peakHold = 0; holdLeft = 0; clip = false;
+    aRms = aRmsSlow = aPeakHold = -100.0f; aClip = false;
     aM = aS = aI = aTp = aSp = aMmax = aSmax = -100.0f; aLra = 0.0f; aIvalid = false;
 }
 
@@ -76,9 +78,12 @@ double LoudnessMeter::lufsFromEnergy (double e) { return e > 0 ? -0.691 + 10.0 *
 void LoudnessMeter::process (const float* const* ch, int numCh, int numSamples)
 {
     numCh = std::min (numCh, 2);
+    rmsFastCoef = std::exp (-1.0 / (fs * 0.3));
+    rmsSlowCoef = std::exp (-1.0 / (fs * 3.0));
+    double blockPeak = 0;
     for (int i = 0; i < numSamples; ++i)
     {
-        double sum = 0;
+        double sum = 0, raw = 0;
         for (int c = 0; c < numCh; ++c)
         {
             const double x = ch[c][i];
@@ -89,6 +94,8 @@ void LoudnessMeter::process (const float* const* ch, int numCh, int numSamples)
             auto& h = tpHist[(size_t) c];
             h[(size_t) tpPos] = x;
             spMax = std::max (spMax, std::abs (x));
+            blockPeak = std::max (blockPeak, std::abs (x));
+            raw += x * x;
             for (int p = 0; p < kPhases; ++p)
             {
                 double acc = 0;
@@ -97,6 +104,9 @@ void LoudnessMeter::process (const float* const* ch, int numCh, int numSamples)
                 tpMax = std::max (tpMax, std::abs (acc));
             }
         }
+        raw /= numCh;   // mean square across channels
+        rmsFast = rmsFastCoef * rmsFast + (1.0 - rmsFastCoef) * raw;
+        rmsSlow = rmsSlowCoef * rmsSlow + (1.0 - rmsSlowCoef) * raw;
         if (numCh == 1) sum *= 2.0;   // mono played on two speakers (EBU convention)
         tpPos = (tpPos + 1) % kPerPhase;
         subSum += sum;
@@ -104,6 +114,18 @@ void LoudnessMeter::process (const float* const* ch, int numCh, int numSamples)
     }
     aTp.store ((float) (tpMax > 0 ? 20 * std::log10 (tpMax) : kFloor));
     aSp.store ((float) (spMax > 0 ? 20 * std::log10 (spMax) : kFloor));
+
+    // peak hold: 3 s, then fall at 20 dB/s
+    const double dt = numSamples / fs;
+    if (blockPeak >= peakHold) { peakHold = blockPeak; holdLeft = 3.0; }
+    else if (holdLeft > 0) holdLeft -= dt;
+    else peakHold *= std::pow (10.0, -20.0 * dt / 20.0);
+    if (blockPeak >= 0.99999) clip = true;
+    auto toDb = [] (double v) { return (float) (v > 1e-10 ? 20 * std::log10 (v) : kFloor); };
+    aPeakHold.store (toDb (peakHold));
+    aRms.store ((float) (rmsFast > 1e-20 ? 10 * std::log10 (rmsFast) : kFloor));
+    aRmsSlow.store ((float) (rmsSlow > 1e-20 ? 10 * std::log10 (rmsSlow) : kFloor));
+    aClip.store (clip);
 }
 
 void LoudnessMeter::endOfSubBlock()
@@ -192,6 +214,7 @@ LoudnessMeter::Readings LoudnessMeter::get() const
     Readings r;
     r.momentary = aM; r.shortTerm = aS; r.integrated = aI; r.lra = aLra;
     r.truePeakDb = aTp; r.samplePeakDb = aSp; r.momentaryMax = aMmax; r.shortTermMax = aSmax;
+    r.rmsDb = aRms; r.rmsSlowDb = aRmsSlow; r.peakHoldDb = aPeakHold; r.clipped = aClip;
     r.integratedValid = aIvalid;
     return r;
 }

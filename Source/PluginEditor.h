@@ -19,6 +19,7 @@ private:
     EqDisplay display;
     BandPanel bandPanel;
     LoudnessPanel loudness;
+    LevelMeters meters { proc };
     AutoPanel autoPanel;
 
     juce::ComboBox phase, analyzer, range;

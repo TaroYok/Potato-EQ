@@ -129,7 +129,8 @@ namespace ana
                                   speed ("anaSpeed"), tilt ("anaTilt"), range ("anaRange"),
                                   showSc ("anaShowSc"), collide ("anaCollide"), smoothing ("anaSmooth"), noteGrid ("anaNoteGrid"),
                                   view ("anaView"), fill ("anaFill"), palette ("anaPalette"), customLight ("anaLight"), customDark ("anaDark"),
-                                  scheme ("uiScheme");
+                                  scheme ("uiScheme"), units ("uiUnits");
+    inline const juce::StringArray unitNames { "LUFS", "dB (dBFS)", "Both" };
     inline const juce::StringArray smoothingNames { "Off (1/48 oct)", "Light (1/24 oct)", "Medium (1/12 oct)", "Heavy (1/6 oct)", "Very heavy (1/3 oct)" };
     inline const juce::StringArray resolutionNames { "Low", "Medium", "High", "Maximum" };   // FFT 2k/4k/8k/16k
     inline const juce::StringArray speedNames { "Slow", "Medium", "Fast" };

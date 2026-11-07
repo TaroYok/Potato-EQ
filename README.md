@@ -46,6 +46,12 @@ Every push to `main` also builds the plugin; those builds are under **Actions �
 - Mix / Master: Polish, Air, Mono Bass (M/S), Wider Top (M/S)
 - Sweeps: Low-Pass, High-Pass, Band-Pass, Resonant Peak, Notch. Automate Band 1's frequency in your DAW
 
+**Meters: LUFS / dB switch**
+- One switch (loudness panel header, or Display → Meter units: LUFS / dB / Both) flips every meter
+- **dB mode**: RMS (300 ms and 3 s, dBFS), peak with 3 s hold then 20 dB/s fall, true peak, crest factor, headroom, clip light
+- **In / Out bar meters** beside the display (plus limiter gain reduction when the limiter is on);
+  in LUFS mode they show momentary + short-term loudness with the target line. Click them to reset peaks / clip lights
+
 **Loudness (ITU-R BS.1770-4 / EBU R128)**
 - Momentary, short-term, gated integrated LUFS, loudness range (LRA), 4×-oversampled true peak
 - Targets: Spotify/YouTube −14, Apple −16, club −9, loud −8, hip-hop/EDM −11, broadcast −23, podcast −16

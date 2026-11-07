@@ -410,6 +410,18 @@ int main (int argc, char** argv)
                 sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so);
             }
         if (auto* pe = dynamic_cast<PotatoEQEditor*> (ed.get())) pe->setScheme (0);
+        // meter units: LUFS and dB, with the limiter on so the GR meter shows
+        p->setParam (params::id::limiter, 1.0f);
+        for (int u = 0; u < 2; ++u)
+        {
+            p->apvts.state.setProperty (ana::units, u, nullptr);
+            for (int i = 0; i < 40; ++i) { run (*p, 0.03, pinkish); pump (25); }
+            auto im = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+            File sf = f.getSiblingFile (f.getFileNameWithoutExtension() + (u == 0 ? "-units-lufs.png" : "-units-db.png"));
+            sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so);
+        }
+        p->apvts.state.setProperty (ana::units, 0, nullptr);
+        p->setParam (params::id::limiter, 0.0f);
         struct Look { int view, fill, palette; const char* name; };
         const Look looks[] = { { 0, 1, 0, "level-ipodblue" }, { 0, 2, 3, "heat-sunset" }, { 0, 3, 0, "slices-ipodblue" },
                                { 1, 1, 4, "spectrogram-ember" } };

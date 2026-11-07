@@ -283,6 +283,16 @@ LoudnessPanel::LoudnessPanel (PotatoEQProcessor& p) : proc (p)
     match.setTooltip ("Sets the output gain so the integrated loudness hits the target, without pushing the true peak above -1 dBTP. "
                       "Reaching loud targets needs a limiter after this EQ.");
     reset.onClick = [this] { proc.resetMeter(); history.clear(); status = {}; };
+    for (auto* b : { &unitLufs, &unitDb })
+    {
+        b->setClickingTogglesState (false);
+        b->setConnectedEdges (b == &unitLufs ? Button::ConnectedOnRight : Button::ConnectedOnLeft);
+        addAndMakeVisible (*b);
+    }
+    unitLufs.setTooltip ("Show loudness in LUFS (what streaming services measure)");
+    unitDb.setTooltip ("Show plain levels in dBFS: RMS, peak and crest factor");
+    unitLufs.onClick = [this] { proc.apvts.state.setProperty (ana::units, 0, nullptr); };
+    unitDb.onClick = [this] { proc.apvts.state.setProperty (ana::units, 1, nullptr); };
     aAutoLevel = std::make_unique<APVTS::ButtonAttachment> (proc.apvts, params::id::autoLevel, autoLevel);
     aLimiter = std::make_unique<APVTS::ButtonAttachment> (proc.apvts, params::id::limiter, limiterOn);
     autoLevel.setTooltip ("Continuously sets the gain so the track lands on the loudness target. Turn the limiter on for loud targets.");
@@ -309,12 +319,16 @@ void LoudnessPanel::timerCallback()
 {
     r = proc.meter.get();
     grShown = jmax (proc.limiterReductionDb(), grShown * 0.85f);
+    const int units = ana::get (proc.apvts.state, ana::units, 0);
+    if (units != lastUnits) { lastUnits = units; history.clear(); }
+    unitLufs.setToggleState (units != 1, dontSendNotification);
+    unitDb.setToggleState (units == 1, dontSendNotification);
     const bool isCustom = params::lufsTargets()[(size_t) jlimit (0, (int) params::lufsTargets().size() - 1, target.getSelectedId() - 1)].lufs > 0;
     custom.setEnabled (isCustom); customL.setEnabled (isCustom);
     ceiling.setEnabled (limiterOn.getToggleState());
     if (++tick % 2 == 0)
     {
-        history.push_back (r.momentary);
+        history.push_back (lastUnits == 1 ? r.rmsDb : r.momentary);
         if (history.size() > 300) history.erase (history.begin());
     }
     repaint();
@@ -325,23 +339,44 @@ void LoudnessPanel::paint (Graphics& g)
     theme::drawGlassPanel (g, getLocalBounds().toFloat());
     auto r0 = getLocalBounds().reduced (12, 10);
     g.setColour (theme::text); g.setFont (theme::font (13.0f, true));
-    g.drawText ("LOUDNESS  (output)", r0.removeFromTop (18), Justification::centredLeft);
+    const int units = jmax (0, lastUnits);
+    const bool db = units == 1;
+    g.drawText (db ? "LEVEL  (output)" : "LOUDNESS  (output)", r0.removeFromTop (18), Justification::centredLeft);
 
     const float tgt = proc.targetLufs();
     auto fmt = [] (float v) { return v <= -69.9f ? String ("--") : String (v, 1); };
+    auto fmtDb = [] (float v) { return v <= -99.0f ? String ("-inf") : String (v, 1); };
 
     auto big = r0.removeFromTop (54);
     g.setColour (theme::textDim); g.setFont (theme::font (10.5f, true));
-    g.drawText ("INTEGRATED LUFS", big.removeFromTop (14), Justification::centredLeft);
-    const float I = r.integratedValid ? r.integrated : -100.0f;
-    const float diff = I - tgt;
-    g.setColour (I < -69 ? theme::textDim : std::abs (diff) <= 1.0f ? theme::good : std::abs (diff) <= 3.0f ? theme::warn : theme::text);
-    g.setFont (theme::font (34.0f, true));
-    g.drawText (fmt (I), big.removeFromLeft (120), Justification::centredLeft);
-    if (I > -69)
+    g.drawText (db ? "RMS dBFS  (3 s)" : "INTEGRATED LUFS", big.removeFromTop (14), Justification::centredLeft);
+    if (db)
     {
-        g.setFont (theme::font (12.0f)); g.setColour (theme::textDim);
-        g.drawText (std::abs (diff) < 0.05f ? String ("on target") : (diff > 0 ? "+" : "") + String (diff, 1) + " LU vs target", big, Justification::centredLeft);
+        g.setColour (r.rmsSlowDb < -99 ? theme::textDim : theme::text);
+        g.setFont (theme::font (34.0f, true));
+        g.drawText (fmtDb (r.rmsSlowDb), big.removeFromLeft (120), Justification::centredLeft);
+        g.setFont (theme::font (12.0f)); g.setColour (r.clipped ? theme::bad : theme::textDim);
+        g.drawText (r.clipped ? String ("CLIPPED  (Reset to clear)") : "headroom " + fmtDb (-r.samplePeakDb) + " dB", big, Justification::centredLeft);
+    }
+    else
+    {
+        const float I = r.integratedValid ? r.integrated : -100.0f;
+        const float diff = I - tgt;
+        g.setColour (I < -69 ? theme::textDim : std::abs (diff) <= 1.0f ? theme::good : std::abs (diff) <= 3.0f ? theme::warn : theme::text);
+        g.setFont (theme::font (34.0f, true));
+        g.drawText (fmt (I), big.removeFromLeft (120), Justification::centredLeft);
+        auto side = big;
+        if (I > -69)
+        {
+            g.setFont (theme::font (12.0f)); g.setColour (theme::textDim);
+            g.drawText (std::abs (diff) < 0.05f ? String ("on target") : (diff > 0 ? "+" : "") + String (diff, 1) + " LU vs target",
+                        units == 2 ? side.removeFromTop (side.getHeight() / 2) : side, Justification::centredLeft);
+        }
+        if (units == 2)
+        {
+            g.setFont (theme::font (11.5f)); g.setColour (theme::textDim);
+            g.drawText ("RMS " + fmtDb (r.rmsSlowDb) + "  pk " + fmtDb (r.peakHoldDb) + " dB", side.withTrimmedTop (side.getHeight() / 2), Justification::centredLeft);
+        }
     }
 
     auto row = [&] (const String& name, const String& val, Colour c)
@@ -352,14 +387,25 @@ void LoudnessPanel::paint (Graphics& g)
         g.setColour (c); g.setFont (theme::font (12.5f, true));
         g.drawText (val, rr, Justification::centredRight);
     };
-    row ("Short-term (3 s)", fmt (r.shortTerm) + " LUFS", theme::text);
-    row ("Momentary (400 ms)", fmt (r.momentary) + " LUFS", theme::text);
-    row ("Loudness range", String (r.lra, 1) + " LU", theme::text);
-    row ("True peak", fmt (r.truePeakDb) + " dBTP", r.truePeakDb > -1.0f ? theme::bad : theme::text);
+    if (db)
+    {
+        row ("RMS (300 ms)", fmtDb (r.rmsDb) + " dBFS", theme::text);
+        row ("Peak (held 3 s)", fmtDb (r.peakHoldDb) + " dBFS", r.peakHoldDb > -0.1f ? theme::bad : theme::text);
+        row ("True peak (max)", fmt (r.truePeakDb) + " dBTP", r.truePeakDb > -1.0f ? theme::bad : theme::text);
+        const float crest = r.samplePeakDb - r.rmsSlowDb;
+        row ("Crest factor (peak - RMS)", r.rmsSlowDb < -99 ? String ("--") : String (crest, 1) + " dB", crest < 6.0f && r.rmsSlowDb > -99 ? theme::warn : theme::text);
+    }
+    else
+    {
+        row ("Short-term (3 s)", fmt (r.shortTerm) + " LUFS", theme::text);
+        row ("Momentary (400 ms)", fmt (r.momentary) + " LUFS", theme::text);
+        row ("Loudness range", String (r.lra, 1) + " LU", theme::text);
+        row ("True peak", fmt (r.truePeakDb) + " dBTP", r.truePeakDb > -1.0f ? theme::bad : theme::text);
+    }
     {
         String extra;
         if (std::abs (proc.autoLevelDb()) > 0.05f) extra << "Auto level " << (proc.autoLevelDb() > 0 ? "+" : "") << String (proc.autoLevelDb(), 1) << " dB";
-        if (limiterOn.getToggleState()) extra << (extra.isEmpty() ? "" : "   ") << "Limiting " << String (grShown, 1) << " dB";
+        if (limiterOn.getToggleState()) extra << (extra.isEmpty() ? "" : "   ") << (grShown < 0.05f ? String ("Limiter ready") : "Limiting " + String (grShown, 1) + " dB");
         row (extra.isEmpty() ? String() : String ("Gain"), extra, grShown > 3.0f ? theme::warn : theme::accent);
     }
 
@@ -367,8 +413,9 @@ void LoudnessPanel::paint (Graphics& g)
     r0.removeFromTop (6);
     auto graph = r0.removeFromTop (60).toFloat();
     g.setColour (theme::bg); g.fillRoundedRectangle (graph, 4);
-    auto yFor = [&] (float l) { return graph.getBottom() - graph.getHeight() * jlimit (0.0f, 1.0f, (l + 40.0f) / 40.0f); };
-    g.setColour (theme::accent.withAlpha (0.5f)); g.drawHorizontalLine ((int) yFor (tgt), graph.getX(), graph.getRight());
+    const float span = db ? 48.0f : 40.0f;
+    auto yFor = [&] (float l) { return graph.getBottom() - graph.getHeight() * jlimit (0.0f, 1.0f, (l + span) / span); };
+    if (! db) { g.setColour (theme::accent.withAlpha (0.5f)); g.drawHorizontalLine ((int) yFor (tgt), graph.getX(), graph.getRight()); }
     if (history.size() > 1)
     {
         Path p;
@@ -380,7 +427,7 @@ void LoudnessPanel::paint (Graphics& g)
         g.setColour (theme::postSpec); g.strokePath (p, PathStrokeType (1.4f));
     }
     g.setColour (theme::gridText); g.setFont (theme::font (9.5f));
-    g.drawText ("last 30 s", graph.reduced (4, 2), Justification::topLeft);
+    g.drawText (db ? "RMS, last 30 s" : "momentary, last 30 s", graph.reduced (4, 2), Justification::topLeft);
 
     if (status.isNotEmpty())
     {
@@ -392,6 +439,8 @@ void LoudnessPanel::paint (Graphics& g)
 void LoudnessPanel::resized()
 {
     auto r = getLocalBounds().reduced (12, 10);
+    auto sw = r.withHeight (20).removeFromRight (92);
+    unitDb.setBounds (sw.removeFromRight (46)); unitLufs.setBounds (sw);
     r.removeFromTop (18 + 54 + 18 * 5 + 6 + 60 + 8);
     target.setBounds (r.removeFromTop (24));
     r.removeFromTop (4);
@@ -567,4 +616,106 @@ void AutoPanel::resized()
     smooth.setBounds (srow.withTrimmedLeft (80));
     auto bottom = getLocalBounds().reduced (12, 8).withTrimmedBottom (16).removeFromBottom (24);
     commit.setBounds (bottom);
+}
+
+// ---------------------------------------------------------------- level meters
+LevelMeters::LevelMeters (PotatoEQProcessor& p) : proc (p)
+{
+    setTooltip ("Input / output level (and limiter gain reduction). Units follow the LUFS / dB switch. Click to reset peaks and clip lights.");
+    startTimerHz (30);
+}
+
+LevelMeters::~LevelMeters() { stopTimer(); }
+
+void LevelMeters::timerCallback()
+{
+    in = proc.inMeter.get();
+    out = proc.meter.get();
+    gr = jmax (proc.limiterReductionDb(), gr * 0.88f);
+    repaint();
+}
+
+void LevelMeters::mouseDown (const MouseEvent&) { proc.resetMeter(); }
+
+void LevelMeters::paint (Graphics& g)
+{
+    theme::drawGlassPanel (g, getLocalBounds().toFloat());
+    const bool db = ana::get (proc.apvts.state, ana::units, 0) == 1;
+    const bool lim = proc.apvts.getRawParameterValue (params::id::limiter)->load() > 0.5f;
+    auto area = getLocalBounds().toFloat().reduced (6.0f, 10.0f);
+    auto labels = area.removeFromBottom (14.0f);
+    area.removeFromTop (16.0f);                          // value readouts
+    const float lo = db ? -60.0f : -40.0f;               // bottom of the scale
+    auto yFor = [&] (float v) { return area.getBottom() - area.getHeight() * jlimit (0.0f, 1.0f, (v - lo) / -lo); };
+
+    // scale
+    auto scale = area.removeFromLeft (18.0f);
+    g.setFont (theme::font (9.0f));
+    const std::vector<float> marks = db ? std::vector<float> { 0, -6, -12, -24, -36, -48 } : std::vector<float> { 0, -10, -20, -30 };
+    for (float v : marks)
+    {
+        g.setColour (theme::gridText);
+        g.drawText (String ((int) v), Rectangle<float> (scale.getX() - 2, yFor (v) - 5, 18, 10), Justification::centredRight);
+    }
+    area.removeFromLeft (3.0f);
+
+    const int nBars = lim ? 3 : 2;
+    const float gap = 5.0f, w = (area.getWidth() - gap * (nBars - 1)) / nBars;
+    auto bar = [&] (int i) { return Rectangle<float> (area.getX() + i * (w + gap), area.getY(), w, area.getHeight()); };
+    auto readout = [&] (int i, const String& t, Colour c)
+    {
+        g.setColour (c); g.setFont (theme::font (8.5f, true));
+        g.drawFittedText (t, bar (i).withY (area.getY() - 15).withHeight (12).expanded (3, 0).toNearestInt(), Justification::centred, 1, 0.7f);
+    };
+    auto capsule = [&] (Rectangle<float> b)
+    {
+        g.setColour (Colours::black.withAlpha (0.45f)); g.fillRoundedRectangle (b, w * 0.5f);
+        g.setColour (Colours::white.withAlpha (0.08f)); g.drawRoundedRectangle (b, w * 0.5f, 1.0f);
+    };
+    // level colours: accent body, warming up toward the top of the scale
+    ColourGradient grad (theme::bad, 0, yFor (0), theme::accent.darker (0.4f), 0, area.getBottom(), false);
+    grad.addColour (jlimit (0.0, 1.0, (double) ((yFor (db ? -6.0f : -9.0f) - yFor (0)) / area.getHeight())), theme::warn);
+    grad.addColour (jlimit (0.0, 1.0, (double) ((yFor (db ? -18.0f : -18.0f) - yFor (0)) / area.getHeight())), theme::accent);
+
+    auto levelBar = [&] (int i, const arc::LoudnessMeter::Readings& m, const String& name)
+    {
+        const auto b = bar (i);
+        capsule (b);
+        const float body = db ? m.rmsDb : m.momentary, tick = db ? m.peakHoldDb : m.shortTerm;
+        const float yb = yFor (body);
+        if (yb < b.getBottom() - 1)
+        {
+            g.setGradientFill (grad);
+            g.fillRoundedRectangle (b.withTop (yb).reduced (1.5f, 0), (w - 3) * 0.5f);
+            g.setColour (Colours::white.withAlpha (0.22f));   // gloss stripe
+            g.fillRoundedRectangle (b.withTop (yb).reduced (1.5f, 0).withWidth ((w - 3) * 0.4f), 2.0f);
+        }
+        if (tick > lo) { g.setColour (Colours::white.withAlpha (0.9f)); g.fillRect (b.getX() + 1.5f, yFor (tick) - 1.0f, w - 3, 2.0f); }
+        if (m.clipped) { g.setColour (theme::bad); g.fillEllipse (Rectangle<float> (6, 6).withCentre ({ b.getCentreX(), b.getY() + 5 })); }
+        readout (i, db ? (tick <= -99 ? String ("-inf") : String (roundToInt (tick))) : (m.shortTerm <= -69 ? String ("--") : String (roundToInt (m.shortTerm))), m.clipped ? theme::bad : theme::textDim);
+        g.setColour (theme::textDim); g.setFont (theme::font (9.5f, true));
+        g.drawText (name, Rectangle<float> (b.getX() - 4, labels.getY(), w + 8, labels.getHeight()), Justification::centred);
+    };
+    levelBar (0, in, "IN");
+    levelBar (1, out, "OUT");
+    if (! db)
+    {   // loudness target across the bars
+        const float yt = yFor (proc.targetLufs());
+        g.setColour (theme::accent2.withAlpha (0.85f));
+        g.drawLine (area.getX() - 2, yt, area.getRight(), yt, 1.2f);
+    }
+    if (lim)
+    {   // gain reduction grows down from the top, 0..-12 dB
+        const auto b = bar (2);
+        capsule (b);
+        const float h = b.getHeight() * jlimit (0.0f, 1.0f, gr / 12.0f);
+        if (h > 0.5f)
+        {
+            g.setGradientFill (ColourGradient (theme::autoCol.brighter (0.3f), 0, b.getY(), theme::autoCol.darker (0.3f), 0, b.getY() + h, false));
+            g.fillRoundedRectangle (b.withHeight (h).reduced (1.5f, 0), (w - 3) * 0.5f);
+        }
+        readout (2, gr < 0.05f ? String ("0") : String (-gr, 1), theme::autoCol);
+        g.setColour (theme::textDim); g.setFont (theme::font (9.5f, true));
+        g.drawText ("GR", Rectangle<float> (b.getX() - 4, labels.getY(), w + 8, labels.getHeight()), Justification::centred);
+    }
 }

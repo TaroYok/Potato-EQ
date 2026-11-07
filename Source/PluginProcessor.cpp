@@ -56,6 +56,7 @@ void PotatoEQProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     engine.prepare (sampleRate);
     meter.prepare (sampleRate);
     preMeter.prepare (sampleRate);
+    inMeter.prepare (sampleRate);
     limiter.prepare (sampleRate);
     outSmooth.reset (sampleRate, 0.05);
     outSmooth.setCurrentAndTargetValue (Decibels::decibelsToGain (pOut->load()));
@@ -150,6 +151,8 @@ void PotatoEQProcessor::processBlock (AudioBuffer<float>& fullBuffer, MidiBuffer
         f.push (monoScratch.data(), n);
     };
     pushMono (preFifo);
+    if (meterResetRequest.load()) inMeter.reset();
+    inMeter.process (buffer.getArrayOfReadPointers(), numCh, n);
 
     const int autoMode = effectiveAutoMode();
     if (autoMode != params::autoOff) analyseForLearning (buffer, n);

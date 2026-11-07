@@ -61,6 +61,7 @@ public:
     juce::AudioProcessorValueTreeState apvts;
     SampleFifo preFifo, postFifo, scFifo;
     arc::LoudnessMeter meter, preMeter;   // output, and after-EQ/before-gain (used by auto level)
+    arc::LoudnessMeter inMeter;           // plugin input, for the In meter
     float autoLevelDb() const { return autoLevelNow.load(); }
     float limiterReductionDb() const { return limiterGr.load(); }
     bool sidechainActive() const { return scActive.load(); }
