@@ -433,7 +433,7 @@ int main (int argc, char** argv)
                 File sf = f.getSiblingFile (f.getFileNameWithoutExtension() + "-font" + String (fi) + ".png");
                 sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so);
             }
-            pe->setUiFont (0);
+            pe->setUiFont (4);
             // a custom colour scheme
             auto& st = p->apvts.state;
             const uint32 custom[] = { 0xff2b2140, 0xff3a2f57, 0xff140f22, 0xffff8fb1, 0xff8fe3ff, 0xffb69cff, 0xfffff4fa, 0xff1b1030, 0xfff3e6ff };

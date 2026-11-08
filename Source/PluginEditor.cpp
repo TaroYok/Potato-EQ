@@ -8,7 +8,8 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
     : AudioProcessorEditor (&p), proc (p), display (p), bandPanel (p), loudness (p), autoPanel (p)
 {
     theme::applySchemeFromState (proc.apvts.state);
-    theme::setUiFont (ana::get (proc.apvts.state, ana::uiFont, 0));
+    ++theme::openEditors();
+    theme::setUiFont (ana::get (proc.apvts.state, ana::uiFont, 4));
     lnf.refreshColours();
     setLookAndFeel (&lnf);
     auto& s = proc.apvts;
@@ -76,7 +77,12 @@ void PotatoEQEditor::updateExperimental()
     if (autoPanel.isVisible() != on) { autoPanel.setVisible (on); resized(); }
 }
 
-PotatoEQEditor::~PotatoEQEditor() { setLookAndFeel (nullptr); }
+PotatoEQEditor::~PotatoEQEditor()
+{
+    setLookAndFeel (nullptr);
+    // release the embedded fonts with the last window, before JUCE's own font cache goes away at unload
+    if (--theme::openEditors() == 0) { theme::uiRegular() = nullptr; theme::uiBold() = nullptr; }
+}
 
 
 void PotatoEQEditor::showAnalyzerMenu()
@@ -111,7 +117,7 @@ void PotatoEQEditor::showAnalyzerMenu()
     m.addSubMenu ("Colour scheme", sch);
     {
         PopupMenu fm;
-        const int cur = ana::get (st, ana::uiFont, 0);
+        const int cur = ana::get (st, ana::uiFont, 4);
         for (int i = 0; i < theme::fontNames.size(); ++i) fm.addItem (1100 + i, theme::fontNames[i], true, cur == i);
         m.addSubMenu ("Font", fm);
     }

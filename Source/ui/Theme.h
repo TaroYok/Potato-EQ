@@ -42,6 +42,7 @@ inline Colour bandColour (int band)
 // ---- interface font (embedded open-licence fonts, chosen in Display > Font)
 inline juce::Typeface::Ptr& uiRegular() { static juce::Typeface::Ptr p; return p; }
 inline juce::Typeface::Ptr& uiBold()    { static juce::Typeface::Ptr p; return p; }
+inline int& openEditors()               { static int n = 0; return n; }
 inline float& uiFontScale()             { static float k = 1.0f; return k; }   // evens out each font's built-in spacing
 inline const juce::StringArray fontNames { "Classic (system)", "Nunito (soft, rounded)", "Inter (clean, very readable)",
                                            "DM Sans (soft geometric)", "Manrope (modern)", "Quicksand (softest)" };
