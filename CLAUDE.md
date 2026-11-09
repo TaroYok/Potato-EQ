@@ -29,12 +29,13 @@ First configure downloads JUCE (pinned commit in CMakeLists.txt). Built plugin:
 - CI (.github/workflows/build.yml) builds Windows/macOS/Linux on every push to main and publishes a Release.
 
 ## Code map
-- `Source/dsp/`: filters (TPT SVF), EqEngine (bands, M/S, dynamic, sidechain), Loudness (BS.1770), Limiter, AutoEq.
+- `Source/dsp/`: filters (TPT SVF), EqEngine (bands, M/S, dynamic, sidechain), Loudness (BS.1770), Limiter, AutoEq,
+  Spectral (spectral dynamics, STFT; latency = FFT size while a band is spectral), Collision (track-vs-track maths).
+- `Source/SpectrumShare.h`: static registry; each instance's worker thread publishes its output spectrum (collision detection).
 - `Source/PluginProcessor.*`: parameters, auto level (ride / learn-then-lock), linear phase FIR, presets, state.
 - `Source/ui/`: Theme (colour schemes, fonts), EqDisplay (analyzer), Panels (band, loudness, meters, auto EQ).
 - `tests/DspTests.cpp` (ctest), `tests/PluginHarness.cpp` (end-to-end + screenshots; Linux CI).
 - Known flake: harness checks for "learned a curve after ~12 s" can fail on a slow CI runner; a re-run passes.
 
 ## Open ideas
-- Collision detection work in progress on branch `wip/collision-detection`.
 - Make the timing-based harness checks more tolerant of slow machines.

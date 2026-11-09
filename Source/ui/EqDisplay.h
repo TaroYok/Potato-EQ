@@ -19,6 +19,12 @@ public:
     void mouseDoubleClick (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     void mouseExit (const juce::MouseEvent&) override;
+    void showCompareMenu();
+    juce::StringArray compareNames() const;            // other Potato EQs this one is compared with (saved with the project)
+    void setCompareNames (const juce::StringArray&);
+    int numCollisionRegions() const { return (int) collRegions.size(); }
+    double collisionCentreHz (int i) const { return collRegions[(size_t) i].region.centreHz(); }
+    void makeRoom (int regionIndex, bool spectral);    // adds a cut on this track where it clashes
 
     int getSelected() const { return selected; }
     void setSelected (int b);
@@ -79,6 +85,18 @@ private:
     void drawStyledSpectrum (juce::Graphics&, const Spectrum&, const theme::Palette&, int style);
     Spectrum pre, post, side;
     std::vector<float> specCol;   // live spectral-dynamics gain change per display column (dB)
+
+    // collision detection with other Potato EQs in the project
+    juce::TextButton compareBtn { "Compare" };
+    std::optional<share::Snapshot> me;
+    std::vector<share::Snapshot> compared;   // selected others (live or not)
+    arc::collide::Spectrum collShown {};     // smoothed 0..1 per band
+    std::array<int, arc::collide::kBands> collWho {};   // index into `compared` of the strongest clash per band
+    struct CollRegion { arc::collide::Region region; juce::String with; juce::Colour colour; };
+    std::vector<CollRegion> collRegions;
+    float otherOffset = 0.0f;                // aligns shared spectra with this analyzer's scale
+    void updateCollisions();
+    int regionAt (float x) const;
     std::array<arc::BandSettings, arc::kNumBands> bands;
 
     // per-band response curves are cached and only recomputed when a band changes

@@ -166,7 +166,8 @@ namespace ana
                                   speed ("anaSpeed"), tilt ("anaTilt"), range ("anaRange"),
                                   showSc ("anaShowSc"), collide ("anaCollide"), smoothing ("anaSmooth"), noteGrid ("anaNoteGrid"),
                                   view ("anaView"), fill ("anaFill"), palette ("anaPalette"), customLight ("anaLight"), customDark ("anaDark"),
-                                  scheme ("uiScheme"), units ("uiUnits"), uiFont ("uiFont");
+                                  scheme ("uiScheme"), units ("uiUnits"), uiFont ("uiFont"),
+                                  cmpWith ("cmpWith"), cmpSens ("cmpSens");
     inline juce::Identifier customSlot (int i) { return juce::Identifier ("uiC" + juce::String (i)); }
     inline const juce::StringArray unitNames { "LUFS", "dB (dBFS)", "Both" };
     inline const juce::StringArray smoothingNames { "Off (1/48 oct)", "Light (1/24 oct)", "Medium (1/12 oct)", "Heavy (1/6 oct)", "Very heavy (1/3 oct)" };

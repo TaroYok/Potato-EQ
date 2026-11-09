@@ -11,6 +11,10 @@ EqDisplay::EqDisplay (PotatoEQProcessor& p) : proc (p)
     for (auto* s : { &pre, &post, &side }) s->ring.assign (kMaxSize, 0.0f);
     fftData.assign (2 * kMaxSize, 0.0f);
     setOpaque (false);   // rounded corners
+    addAndMakeVisible (compareBtn);
+    compareBtn.setTooltip ("Compare this track with other Potato EQs in your project and see where they collide "
+                           "(both strong at the same frequencies). Red = clash. Right-click a red area to make room.");
+    compareBtn.onClick = [this] { showCompareMenu(); };
     startTimerHz (30);
 }
 
@@ -35,6 +39,10 @@ float EqDisplay::yForSpectrum (double db) const
 
 void EqDisplay::resized()
 {
+    {
+        const auto a = plotArea();
+        compareBtn.setBounds (Rectangle<int> ((int) a.getRight() - 156, (int) a.getY() + 6, 150, 22));
+    }
     const int cols = jmax (1, (int) plotArea().getWidth() / kColStep + 1);
     for (auto* s : { &pre, &post, &side }) { s->display.assign ((size_t) cols, -150.0f); s->peak.assign ((size_t) cols, -150.0f); }
 }
@@ -142,8 +150,181 @@ void EqDisplay::timerCallback()
             c += (v - c) * (std::abs (v) > std::abs (c) ? 0.7f : 0.2f);   // quick to show, calm to fall back
         }
     }
+    updateCollisions();
     if (mouseInside && dragging < 0 && hovered < 0) findPeakNear (mousePos);
     repaint();
+}
+
+// ---------------------------------------------------------------- collisions with other Potato EQs
+StringArray EqDisplay::compareNames() const
+{
+    return StringArray::fromLines (proc.apvts.state.getProperty (ana::cmpWith).toString());
+}
+
+void EqDisplay::setCompareNames (const StringArray& names)
+{
+    StringArray clean;
+    for (auto& n : names) if (n.trim().isNotEmpty()) clean.addIfNotAlreadyThere (n.trim());
+    proc.apvts.state.setProperty (ana::cmpWith, clean.joinIntoString ("\n"), nullptr);
+    updateCollisions();
+    repaint();
+}
+
+void EqDisplay::updateCollisions()
+{
+    namespace cl = arc::collide;
+    const auto all = share::Registry::get().all();
+    const auto names = compareNames();
+    me.reset(); compared.clear();
+    for (auto& sn : all)
+    {
+        if (sn.id == proc.shareId()) me = sn;
+        else if (names.contains (sn.name)) compared.push_back (sn);
+    }
+    String label = "Compare";
+    if (! compared.empty()) label = "vs " + compared.front().name + (compared.size() > 1 ? " +" + String ((int) compared.size() - 1) : String());
+    if (compareBtn.getButtonText() != label) compareBtn.setButtonText (label);
+
+    // line the shared spectra up with this analyzer's own scale (they're measured differently)
+    const auto a = plotArea();
+    const double tilt = ana::tiltValues[jlimit (0, 3, setting (ana::tilt, 2))];
+    if (me && me->live() && ! post.display.empty())
+    {
+        std::vector<float> d;
+        for (int i = 0; i < cl::kBands; ++i)
+        {
+            const double f = cl::bandFreq (i);
+            if (me->db[(size_t) i] < -90.0f || f < kLoHz || f > kHiHz) continue;
+            const int col = (int) ((xForFreq (f) - a.getX()) / kColStep);
+            if (col < 0 || col >= (int) post.display.size() || post.display[(size_t) col] < -120.0f) continue;
+            d.push_back (post.display[(size_t) col] - (float) (me->db[(size_t) i] - 10.0 * std::log10 (f / 1000.0) + tilt * std::log2 (f / 1000.0)));
+        }
+        if (d.size() > 10)
+        {
+            std::nth_element (d.begin(), d.begin() + (long) d.size() / 2, d.end());
+            otherOffset += (d[d.size() / 2] - otherOffset) * 0.1f;
+        }
+    }
+
+    cl::Spectrum now {};
+    std::array<int, cl::kBands> who; who.fill (-1);
+    const bool on = setting (ana::collide, 1) != 0 && me && me->live();
+    const float sens = (float) jlimit (0, 2, setting (ana::cmpSens, 1));
+    if (on)
+        for (size_t j = 0; j < compared.size(); ++j)
+        {
+            if (! compared[j].live()) continue;
+            const auto r = cl::find (me->db, compared[j].db, sens);
+            for (int i = 0; i < cl::kBands; ++i)
+                if (r.amount[(size_t) i] > now[(size_t) i]) { now[(size_t) i] = r.amount[(size_t) i]; who[(size_t) i] = (int) j; }
+        }
+    for (int i = 0; i < cl::kBands; ++i)
+    {
+        auto& c = collShown[(size_t) i];
+        if (now[(size_t) i] >= c) { c = now[(size_t) i]; if (who[(size_t) i] >= 0) collWho[(size_t) i] = who[(size_t) i]; }
+        else c *= 0.9f;   // fades out over ~1/3 s
+        if (c < 0.02f) c = 0.0f;
+    }
+    collRegions.clear();
+    for (int i = 0; i < cl::kBands;)
+    {
+        if (collShown[(size_t) i] < 0.25f) { ++i; continue; }
+        cl::Region g; g.lo = g.peak = i;
+        while (i < cl::kBands && collShown[(size_t) i] >= 0.25f) { if (collShown[(size_t) i] > collShown[(size_t) g.peak]) g.peak = i; ++i; }
+        g.hi = i - 1; g.amount = collShown[(size_t) g.peak];
+        const int w = collWho[(size_t) g.peak];
+        CollRegion cr { g, "another track", theme::bad };
+        if (w >= 0 && w < (int) compared.size()) { cr.with = compared[(size_t) w].name; cr.colour = compared[(size_t) w].colour; }
+        collRegions.push_back (cr);
+    }
+}
+
+int EqDisplay::regionAt (float x) const
+{
+    const double f = freqForX (x);
+    for (size_t i = 0; i < collRegions.size(); ++i)
+        if (f >= arc::collide::bandLo (collRegions[i].region.lo) && f <= arc::collide::bandHi (collRegions[i].region.hi)) return (int) i;
+    return -1;
+}
+
+void EqDisplay::makeRoom (int ri, bool spectral)
+{
+    if (! isPositiveAndBelow (ri, (int) collRegions.size())) return;
+    const auto cr = collRegions[(size_t) ri];
+    const auto sug = arc::collide::suggestCut (cr.region);
+    const int b = addBand (arc::BandType::Bell, sug.freq, spectral ? 0.0 : sug.gainDb, sug.q);
+    if (b < 0) { showMessage ("All 24 bands are in use"); return; }
+    if (spectral)
+    {
+        proc.setParam (params::bandId (b, "dyn"), 1.0f);
+        proc.setParam (params::bandId (b, "spec"), 1.0f);
+        proc.setParam (params::bandId (b, "specAuto"), 1.0f);
+        proc.setParam (params::bandId (b, "range"), (float) (2.0 * sug.gainDb));
+    }
+    bands[(size_t) b] = proc.bandSettings (b);
+    showMessage ("Made room for " + cr.with + " around " + theme::freqText (sug.freq)
+                 + (spectral ? " (spectral: only when this track pokes out there)" : ""));
+}
+
+void EqDisplay::showCompareMenu()
+{
+    const auto all = share::Registry::get().all();
+    const auto selectedNames = compareNames();
+    StringArray others; std::vector<bool> live;
+    for (auto& sn : all) if (sn.id != proc.shareId()) { others.add (sn.name); live.push_back (sn.live()); }
+    PopupMenu m, sens;
+    m.addSectionHeader ("This track: " + proc.instanceName());
+    if (others.isEmpty())
+    {
+        m.addItem (-1, "No other Potato EQs in this project yet", false);
+        m.addItem (-2, "(add one to another track; a plugin running \"bridged\" can't be seen)", false);
+    }
+    else
+    {
+        m.addSectionHeader ("Compare with");
+        for (int k = 0; k < others.size(); ++k)
+            m.addItem (100 + k, others[k] + (live[(size_t) k] ? String() : String ("   (not playing)")), true, selectedNames.contains (others[k]));
+        m.addItem (2, "All of them");
+        m.addItem (3, "None", ! selectedNames.isEmpty());
+    }
+    m.addSeparator();
+    m.addItem (4, "Highlight collisions in red", true, setting (ana::collide, 1) != 0);
+    const int sv = setting (ana::cmpSens, 1);
+    sens.addItem (10, "Low (only the biggest clashes)", true, sv == 0);
+    sens.addItem (11, "Normal", true, sv == 1);
+    sens.addItem (12, "High (milder overlaps too)", true, sv == 2);
+    m.addSubMenu ("Collision sensitivity", sens);
+    m.addSeparator();
+    m.addItem (5, "Rename this track's Potato EQ...");
+    SafePointer<EqDisplay> safe (this);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&compareBtn), [safe, others, selectedNames] (int r)
+    {
+        if (safe == nullptr || r <= 0) return;
+        auto& st = safe->proc.apvts.state;
+        if (r >= 100 && r - 100 < others.size())
+        {
+            auto sel = selectedNames;
+            const auto& n = others[r - 100];
+            if (sel.contains (n)) sel.removeString (n); else sel.add (n);
+            safe->setCompareNames (sel);
+        }
+        else if (r == 2) safe->setCompareNames (others);
+        else if (r == 3) safe->setCompareNames ({});
+        else if (r == 4) st.setProperty (ana::collide, ana::get (st, ana::collide, 1) != 0 ? 0 : 1, nullptr);
+        else if (r >= 10 && r <= 12) st.setProperty (ana::cmpSens, r - 10, nullptr);
+        else if (r == 5)
+        {
+            auto* w = new AlertWindow ("Rename", "Name this Potato EQ so other tracks can recognise it (e.g. Kick, Bass, Lead vocal).",
+                                       MessageBoxIconType::NoIcon, safe.getComponent());
+            w->addTextEditor ("name", safe->proc.instanceName());
+            w->addButton ("OK", 1, KeyPress (KeyPress::returnKey));
+            w->addButton ("Cancel", 0, KeyPress (KeyPress::escapeKey));
+            w->enterModalState (true, ModalCallbackFunction::create ([safe, w] (int res)
+            {
+                if (res == 1 && safe != nullptr) safe->proc.setInstanceName (w->getTextEditorContents ("name"));
+            }), true);
+        }
+    });
 }
 
 const EqDisplay::Spectrum* EqDisplay::grabSource() const
@@ -359,7 +540,50 @@ void EqDisplay::paint (Graphics& g)
             }
         }
         g.setColour (theme::scSpec); g.setFont (theme::font (11.0f));
-        g.drawText ("sidechain", a.reduced (8, 4).removeFromTop (14), Justification::topRight);
+        g.drawText ("sidechain", a.reduced (8, 4).withTrimmedTop (26).removeFromTop (14).withTrimmedRight (160), Justification::topRight);
+    }
+
+    // other Potato EQs and where they collide with this track
+    if (mode != 0 && ! compared.empty())
+    {
+        namespace cl = arc::collide;
+        const double tilt = ana::tiltValues[jlimit (0, 3, setting (ana::tilt, 2))];
+        // shared levels are energy per band; the analyzer shows energy density, so take out the band width (3 dB/oct)
+        auto yOf = [&] (int i, float db) { const double f = cl::bandFreq (i); return yForSpectrum (db - 10.0 * std::log10 (f / 1000.0) + tilt * std::log2 (f / 1000.0) + otherOffset); };
+        if (me && setting (ana::collide, 1) != 0)
+            for (int i = 0; i < cl::kBands; ++i)
+            {
+                const float k = collShown[(size_t) i];
+                if (k < 0.05f) continue;
+                const float x0 = xForFreq (cl::bandLo (i)), x1 = xForFreq (cl::bandHi (i));
+                const int w = collWho[(size_t) i];
+                const float other = (w >= 0 && w < (int) compared.size()) ? compared[(size_t) w].db[(size_t) i] : me->db[(size_t) i];
+                const float y = jlimit (a.getY(), a.getBottom(), yOf (i, jmin (me->db[(size_t) i], other)));
+                g.setColour (theme::bad.withAlpha (0.10f + 0.32f * k));
+                g.fillRect (Rectangle<float> (x0, y, x1 - x0 + 0.5f, a.getBottom() - y));
+                g.setColour (theme::bad.withAlpha (0.35f + 0.6f * k));
+                g.fillRect (Rectangle<float> (x0, a.getBottom() - 5.0f, x1 - x0 + 0.5f, 5.0f));
+            }
+        float ly = (float) compareBtn.getBottom() + 4.0f;
+        for (auto& o : compared)
+        {
+            Path p; bool started = false;
+            for (int i = 0; i < cl::kBands; ++i)
+            {
+                const double f = cl::bandFreq (i);
+                if (f < kLoHz || f > kHiHz) continue;
+                const float x = xForFreq (f), y = jlimit (a.getY(), a.getBottom(), yOf (i, o.db[(size_t) i]));
+                if (! started) { p.startNewSubPath (x, y); started = true; } else p.lineTo (x, y);
+            }
+            g.setColour (o.colour.withAlpha (o.live() ? 0.85f : 0.3f));
+            g.strokePath (p, PathStrokeType (1.3f, PathStrokeType::curved));
+            const String t = o.name + (o.live() ? String() : String ("  (not playing)"));
+            g.setFont (theme::font (11.0f));
+            const auto row = Rectangle<float> ((float) compareBtn.getX(), ly, (float) compareBtn.getWidth(), 14.0f);
+            g.setColour (o.colour.withAlpha (o.live() ? 1.0f : 0.5f)); g.fillEllipse (row.getX() + 2, row.getCentreY() - 3.5f, 7, 7);
+            g.setColour (theme::text.withAlpha (o.live() ? 0.9f : 0.5f)); g.drawText (t, row.withTrimmedLeft (14), Justification::left);
+            ly += 15.0f;
+        }
     }
 
     // curves
@@ -506,6 +730,11 @@ void EqDisplay::paint (Graphics& g)
         g.drawEllipse (Rectangle<float> (14, 14).withCentre (hoverPeak.pt), 1.6f);
         g.drawVerticalLine ((int) hoverPeak.pt.x, hoverPeak.pt.y + 7, a.getBottom());
         tag (hoverPeak.pt, theme::noteName (hoverPeak.freq) + "   " + theme::freqText (hoverPeak.freq) + "   drag to EQ", theme::accent);
+    }
+    else if (mouseInside && a.contains (mousePos) && dragging < 0 && regionAt (mousePos.x) >= 0)
+    {   // collision readout
+        const auto& cr = collRegions[(size_t) regionAt (mousePos.x)];
+        tag (mousePos, "Clashes with " + cr.with + " around " + theme::freqText (cr.region.centreHz()) + "   right-click to make room", theme::bad);
     }
     else if (mouseInside && a.contains (mousePos) && dragging < 0)
     {   // cursor readout along the bottom
@@ -751,6 +980,22 @@ void EqDisplay::mouseDown (const MouseEvent& e)
             bands[(size_t) b] = proc.bandSettings (b);
             showMessage ("Spectral band: only the frequencies that stick out get turned down");
         }
+        return;
+    }
+    if (h < 0 && e.mods.isPopupMenu() && regionAt (e.position.x) >= 0)
+    {
+        const int ri = regionAt (e.position.x);
+        const auto cr = collRegions[(size_t) ri];
+        const auto sug = arc::collide::suggestCut (cr.region);
+        PopupMenu m;
+        m.addSectionHeader ("Clash with " + cr.with + " around " + theme::freqText (cr.region.centreHz()));
+        m.addItem (1, "Make room: cut " + String (-sug.gainDb, 1) + " dB at " + theme::freqText (sug.freq));
+        m.addItem (2, "Make room only when this track pokes out (spectral band)");
+        SafePointer<EqDisplay> safe (this);
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (this).withMousePosition(), [safe, ri] (int r)
+        {
+            if (safe != nullptr && r > 0) safe->makeRoom (ri, r == 2);
+        });
         return;
     }
     if (h < 0 && ! hoverPeak.valid && e.mods.isLeftButtonDown() && e.getNumberOfClicks() == 1) setSelected (-1);   // click empty space: close the band panel

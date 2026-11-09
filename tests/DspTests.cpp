@@ -2,6 +2,7 @@
 #include "dsp/AutoEq.h"
 #include "dsp/Loudness.h"
 #include "dsp/Spectral.h"
+#include "dsp/Collision.h"
 #include <cstdio>
 #include <functional>
 #include <random>
@@ -387,6 +388,37 @@ int main()
             const double ds = 20 * std::log10 (toneAmp (S, 2500, fs, st, 48000) / toneAmp (inS, 2500, fs, st - lat, 48000));
             check (dm < -7.0, "mid-only: mid tone reduced (dB)", dm, -9);
             check (std::abs (ds) < 0.3, "mid-only: side tone untouched (dB)", ds, 0);
+        }
+    }
+
+    // ======================== collision detection
+    std::printf ("\n-- collisions between tracks\n");
+    {
+        namespace cl = arc::collide;
+        auto base = [] { cl::Spectrum s {}; for (int i = 0; i < cl::kBands; ++i) s[(size_t) i] = (float) (-50.0 - 1.5 * std::log2 (cl::bandFreq (i) / 1000.0)); return s; };   // a typical mix slope (per 1/12-oct band)
+        auto bump = [] (cl::Spectrum& s, double f, double db) { for (int i = 0; i < cl::kBands; ++i) { const double o = std::log2 (cl::bandFreq (i) / f); s[(size_t) i] += (float) (db * std::exp (-o * o / (2 * 0.25 * 0.25))); } };
+        auto kick = base(), bass = base();
+        bump (kick, 60, 30); bump (kick, 4000, 26);    // kick: sub thump + click
+        bump (bass, 70, 30); bump (bass, 700, 24);     // bass: low end + growl
+        const auto r = cl::find (kick, bass);
+        check (! r.regions.empty(), "kick vs bass: a collision is found", (double) r.regions.size(), 1);
+        if (! r.regions.empty())
+        {
+            const double c = r.regions.front().centreHz();
+            check (c > 45 && c < 95, "strongest clash is in the low end (Hz)", c, 65);
+        }
+        bool clean = true;
+        for (auto& g : r.regions) { const double c = g.centreHz(); if ((c > 2500 && c < 6000) || (c > 450 && c < 1100)) clean = false; }
+        check (clean, "no clash where only one track is strong (click, growl)", clean, 1);
+        cl::Spectrum silent; silent.fill (-150.0f);
+        check (cl::find (kick, silent).regions.empty(), "a silent track never collides", (double) cl::find (kick, silent).regions.size(), 0);
+        const auto lowSens = cl::find (kick, bass, 0.0f), highSens = cl::find (kick, bass, 2.0f);
+        double sl = 0, sh = 0; for (int i = 0; i < cl::kBands; ++i) { sl += lowSens.amount[(size_t) i]; sh += highSens.amount[(size_t) i]; }
+        check (sh > sl, "higher sensitivity flags more overlap", sh, sl);
+        if (! r.regions.empty())
+        {
+            const auto sug = cl::suggestCut (r.regions.front());
+            check (sug.gainDb <= -2.0 && sug.gainDb >= -4.0 && sug.q >= 0.5 && sug.q <= 6.0, "make-room suggestion is a gentle bell (dB)", sug.gainDb, -3);
         }
     }
 

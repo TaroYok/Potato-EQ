@@ -35,10 +35,59 @@ PotatoEQProcessor::PotatoEQProcessor()
     pSmooth = apvts.getRawParameterValue (params::id::autoSmooth);
     pSpecRes = apvts.getRawParameterValue (params::id::specRes);
     meter.prepare (48000.0);
+    shareIdent = share::Registry::get().add();
+    shareRing.assign (4096, 0.0f); shareWork.assign (8192, 0.0f); shareWindow.resize (4096);
+    for (int i = 0; i < 4096; ++i) shareWindow[(size_t) i] = 0.5f - 0.5f * std::cos (MathConstants<float>::twoPi * (float) i / 4096.0f);
+    shareDb.fill (-150.0f);
     startThread (Thread::Priority::low);
 }
 
-PotatoEQProcessor::~PotatoEQProcessor() { stopThread (2000); }
+PotatoEQProcessor::~PotatoEQProcessor()
+{
+    stopThread (2000);
+    share::Registry::get().remove (shareIdent);
+}
+
+void PotatoEQProcessor::updateTrackProperties (const TrackProperties& p)
+{
+    share::Registry::get().setHostInfo (shareIdent, p.name.value_or (String()), p.colourARGB);
+}
+
+String PotatoEQProcessor::instanceName() const
+{
+    const auto me = share::Registry::get().one (shareIdent);
+    return me ? me->name : String ("Potato EQ");
+}
+
+void PotatoEQProcessor::setInstanceName (const String& name)
+{
+    apvts.state.setProperty ("instName", name.trim().substring (0, 40), nullptr);
+    share::Registry::get().setCustomName (shareIdent, name.trim().substring (0, 40));
+}
+
+// Worker thread: analyses this instance's output and publishes it for other instances.
+void PotatoEQProcessor::updateShare()
+{
+    float tmp[2048];
+    int got, total = 0;
+    while ((got = shareFifo.pull (tmp, 2048)) > 0)
+    {
+        for (int i = 0; i < got; ++i) { shareRing[(size_t) shareRingPos] = tmp[i]; shareRingPos = (shareRingPos + 1) % 4096; }
+        total += got;
+    }
+    if (total == 0) return;
+    for (int i = 0; i < 4096; ++i) shareWork[(size_t) i] = shareRing[(size_t) ((shareRingPos + i) % 4096)] * shareWindow[(size_t) i];
+    std::fill (shareWork.begin() + 4096, shareWork.end(), 0.0f);
+    shareFft.performFrequencyOnlyForwardTransform (shareWork.data(), true);
+    arc::collide::Spectrum now {};
+    share::binsToBands (shareWork.data(), 4096, fs.load(), now);
+    for (int i = 0; i < share::kBands; ++i)   // fast attack, slower release
+    {
+        auto& d = shareDb[(size_t) i];
+        d = now[(size_t) i] > d ? d + (now[(size_t) i] - d) * 0.7f : d + (now[(size_t) i] - d) * 0.15f;
+    }
+    share::Registry::get().publish (shareIdent, shareDb);
+}
 
 bool PotatoEQProcessor::isBusesLayoutSupported (const BusesLayout& l) const
 {
@@ -295,6 +344,7 @@ void PotatoEQProcessor::processBlock (AudioBuffer<float>& fullBuffer, MidiBuffer
     if (meterResetRequest.exchange (false)) meter.reset();
     meter.process (buffer.getArrayOfReadPointers(), numCh, n);
     pushMono (postFifo);
+    shareFifo.push (monoScratch.data(), n);
 }
 
 void PotatoEQProcessor::analyseForLearning (const AudioBuffer<float>& buffer, int numSamples)
@@ -494,6 +544,7 @@ void PotatoEQProcessor::run()
     while (! threadShouldExit())
     {
         wait (60);
+        updateShare();
         const int autoMode = effectiveAutoMode();
         const bool useRef = usingReference();
         const int profile = useRef ? (int) arc::profiles().size() : jlimit (0, (int) arc::profiles().size() - 1, (int) pProfile->load());
@@ -841,6 +892,7 @@ void PotatoEQProcessor::setStateInformation (const void* data, int size)
         }
     }
     apvts.replaceState (state);
+    share::Registry::get().setCustomName (shareIdent, apvts.state.getProperty ("instName").toString().substring (0, 40));
 }
 
 AudioProcessorEditor* PotatoEQProcessor::createEditor() { return new PotatoEQEditor (*this); }

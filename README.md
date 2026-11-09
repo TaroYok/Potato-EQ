@@ -30,6 +30,29 @@ Every push to `main` also builds the plugin; those builds are under **Actions �
 - Drag nodes to move, scroll for Q, double-click to add or bypass, right-click for options, Alt-click to delete.
   Shift = fine adjust, Ctrl/Cmd = frequency only.
 
+**Spectral dynamics** (like Pro-Q 4's Spectral mode)
+- Turn **Spectral** on for a dynamic bell or shelf (band panel, right-click "Make spectral", or **Alt+Shift+click** in the display):
+  instead of moving the whole band, only the frequencies *inside* it that poke above the threshold are pulled down
+  (or pushed up with a positive range). Tames a harsh vocal or a ringing guitar without dulling everything around it
+- **Auto** (default): threshold, attack and release follow the audio; the band reacts to frequencies that stick out
+  about 5 dB above its own typical level. Switch Auto off to set threshold, attack and release yourself
+- **Density**: low = wide areas react together (smooth), high = only narrow, specific frequencies react
+- **Tilt** (on by default): +3 dB/oct before detection, so the top end triggers a little more easily, which suits full mixes
+- **Resolution** Low / Medium / High (21 / 43 / 85 ms latency at 48 kHz, only while a band is spectral)
+- Works with the **sidechain** switch and with Stereo / Left / Right / Mid / Side placement
+- The live per-frequency reduction rides on the EQ curve in aqua
+- Presets: Vocal: Tame Harshness, Guitar: Tame Resonances, Master: Smooth Harsh Highs
+
+**Collision detection between tracks** (no routing needed)
+- Every Potato EQ in your project shares its spectrum with the others. Click **Compare** (top right of the display) and pick
+  the tracks to compare with: their spectra are drawn over yours, and **red** marks where both tracks are strong at
+  the same frequencies (they're fighting for the same space)
+- Hover a red area to see which track it clashes with; **right-click** it to make room: a gentle cut, or a spectral band
+  that only cuts when this track pokes out there
+- Tracks use their DAW track name when the DAW provides it; **Rename** in the Compare menu to name them yourself
+  (saved with the project). Collision sensitivity Low / Normal / High
+- Works when the instances run in the same DAW process (FL Studio's default; a "bridged" plugin can't see the others)
+
 **Analyzer**
 - Pre/post spectrum, resolution (2k–16k FFT), speed, tilt (0 / 3 / 4.5 / 6 dB/oct), 60–120 dB range
 - **Spectrum grab**: hover a peak in the analyzer, then drag it up or down to create a band right on it
@@ -90,6 +113,7 @@ Measured by the test harness on a 2.1 GHz server CPU (one core):
 | Zero latency, all 24 bands (96 dB/oct cuts, 8 dynamic, M/S), live auto EQ, auto level, limiter | ~4 % |
 | Same, with 24 parameters automated every block | ~4.5 % |
 | Linear phase, everything on | ~2.5 % |
+| 8 spectral bands (High resolution) + 16 dynamic bands + limiter | ~7 % |
 
 Parameter changes are smoothed every 32 samples (frequency in log space), and the state-variable
 filters stay stable under fast modulation, so automation sweeps are click-free. In linear-phase mode the FIR
@@ -114,6 +138,9 @@ Source/dsp/Filters.h      filter design + exact response math (TPT state-variabl
 Source/dsp/EqEngine.h     zero-latency engine: 24 bands, M/S, dynamic EQ, auto layer
 Source/dsp/Loudness.*     BS.1770 meter (K-weighting, gating, LRA, true peak)
 Source/dsp/AutoEq.*       target profiles, spectrum → correction fit, curve → bands
+Source/dsp/Spectral.h     spectral dynamics (STFT, per-frequency dynamic gain)
+Source/dsp/Collision.h    collision detection maths (which frequencies two tracks share)
+Source/SpectrumShare.h    process-wide registry the Potato EQ instances share spectra through
 Source/PluginProcessor.*  parameters, linear-phase FIR builder, learning, state
 Source/ui/*               display, band/loudness/auto panels, look and feel
 tests/DspTests.cpp        filter, engine, EBU loudness and auto-EQ tests

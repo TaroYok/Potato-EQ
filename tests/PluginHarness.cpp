@@ -661,6 +661,54 @@ int main (int argc, char** argv)
         p->editorBeingDeleted (ed.get());
     }
 
+    std::puts ("-- collisions between Potato EQs --");
+    {
+        auto pa = std::make_unique<PotatoEQProcessor>(), pb = std::make_unique<PotatoEQProcessor>();
+        for (auto* q : { pa.get(), pb.get() }) { q->setPlayConfigDetails (2, 2, 48000, 512); q->prepareToPlay (48000, 512); }
+        pa->setInstanceName ("Kick");
+        AudioProcessor::TrackProperties tp; tp.name = String ("Bass track");
+        pb->updateTrackProperties (tp);
+        check (pb->instanceName() == "Bass track", "DAW track name is used: " + pb->instanceName(), 1, 1);
+        pb->setInstanceName ("Bass");
+        check (pb->instanceName() == "Bass", "your own name wins: " + pb->instanceName(), 1, 1);
+        Random ra (1), rb (2);
+        long na = 0, nb2 = 0;
+        const double twoPi = 2 * MathConstants<double>::pi;
+        auto kick = [&] (int) { const long n = na++; const float v = (float) (0.3 * std::sin (twoPi * 60 * n / 48000) + 0.12 * std::sin (twoPi * 4000 * n / 48000)) + 0.003f * (ra.nextFloat() - 0.5f); return std::make_pair (v, v); };
+        auto bass = [&] (int) { const long n = nb2++; const float v = (float) (0.3 * std::sin (twoPi * 70 * n / 48000) + 0.12 * std::sin (twoPi * 700 * n / 48000)) + 0.003f * (rb.nextFloat() - 0.5f); return std::make_pair (v, v); };
+        std::unique_ptr<AudioProcessorEditor> ed (pa->createEditor());
+        ed->setSize (1360, 860);
+        EqDisplay* d = nullptr;
+        for (auto* c : ed->getChildren()) if (auto* x = dynamic_cast<EqDisplay*> (c)) d = x;
+        d->setCompareNames ({ "Bass" });
+        for (int i = 0; i < 80; ++i) { run (*pa, 0.03, kick); run (*pb, 0.03, bass); pump (25); }
+        bool low = false, other = false;
+        for (int i = 0; i < d->numCollisionRegions(); ++i)
+        {
+            const double c = d->collisionCentreHz (i);
+            if (c > 40 && c < 110) low = true;
+            if ((c > 2500 && c < 6000) || (c > 450 && c < 1100)) other = true;
+        }
+        check (low, "kick and bass (two plugin instances) clash in the low end", d->numCollisionRegions(), 1);
+        check (! other, "no false clash at the click or the growl", other, 0);
+        File sf = File (shotPath).getSiblingFile ("collisions.png");
+        { auto im = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f); sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so); }
+        int before = 0; for (int b = 0; b < arc::kNumBands; ++b) before += pa->bandSettings (b).used ? 1 : 0;
+        if (d->numCollisionRegions() > 0) d->makeRoom (0, false);
+        int cut = -1; for (int b = 0; b < arc::kNumBands; ++b) if (pa->bandSettings (b).used) cut = b;
+        check (before == 0 && cut >= 0 && pa->bandSettings (cut).gainDb < -1.5 && pa->bandSettings (cut).freq < 150,
+               "make room adds a cut on this track at the clash", cut >= 0 ? pa->bandSettings (cut).freq : 0, 65);
+        // a stopped track stops colliding
+        for (int i = 0; i < 60; ++i) { run (*pa, 0.03, kick); pump (25); }
+        int stale = d->numCollisionRegions();
+        check (stale == 0, "when the other track stops, its clashes fade away", stale, 0);
+        // the name list is saved with the project
+        MemoryBlock mb; pa->getStateInformation (mb);
+        auto pc = std::make_unique<PotatoEQProcessor>(); pc->setStateInformation (mb.getData(), (int) mb.getSize());
+        check (pc->instanceName() == "Kick" && pc->apvts.state.getProperty (ana::cmpWith).toString() == "Bass", "name + compare list come back with the project", 1, 1);
+        pa->editorBeingDeleted (ed.get());
+    }
+
     std::printf ("\n%s (%d failure%s)\n", failures ? "SOME CHECKS FAILED" : "ALL CHECKS PASSED", failures, failures == 1 ? "" : "s");
     p->releaseResources();
     return failures ? 1 : 0;
