@@ -20,6 +20,7 @@ public:
         float rmsDb = -100, rmsSlowDb = -100;   // RMS over ~300 ms and ~3 s (a 0 dBFS sine reads -3.01 dBFS)
         float peakHoldDb = -100;                // sample peak, held 3 s, then falls 20 dB/s
         bool clipped = false;                   // a sample reached 0 dBFS since the last reset
+        float gatedSeconds = 0;                 // how much (non-silent) audio the integrated value is based on
         float momentaryFast = -100;             // momentary loudness (400 ms window) refreshed every 10 ms, for smooth meters
         bool integratedValid = false;
     };
@@ -85,5 +86,6 @@ private:
 
     std::atomic<float> aM { -100 }, aS { -100 }, aI { -100 }, aLra { 0 }, aTp { -100 }, aSp { -100 }, aMmax { -100 }, aSmax { -100 };
     std::atomic<bool> aIvalid { false };
+    std::atomic<float> aGatedSec { 0 };
 };
 } // namespace arc

@@ -70,7 +70,7 @@ void LoudnessMeter::reset()
     rmsFast = rmsSlow = 0; peakHold = 0; holdLeft = 0; clip = false;
     fastRing.fill (0); fastSum = fastChunk = 0; fastPos = fastCount = fastFill = 0; aMfast = -100.0f; aRecentPeak = 0.0f;
     aRms = aRmsSlow = aPeakHold = -100.0f; aClip = false;
-    aM = aS = aI = aTp = aSp = aMmax = aSmax = -100.0f; aLra = 0.0f; aIvalid = false;
+    aM = aS = aI = aTp = aSp = aMmax = aSmax = -100.0f; aLra = 0.0f; aIvalid = false; aGatedSec = 0.0f;
 }
 
 int LoudnessMeter::binFor (double lufs) { return std::clamp ((int) ((lufs + 70.0) / 0.02), 0, kHistBins - 1); }
@@ -171,6 +171,7 @@ void LoudnessMeter::endOfSubBlock()
         bool valid = false;
         const double I = integratedFromHistogram (valid);
         aI.store ((float) I); aIvalid.store (valid);
+        aGatedSec.store ((float) intTotal * 0.1f);   // one 400 ms block every 100 ms
     }
     if (ringCount >= 1)
     {
@@ -231,6 +232,7 @@ LoudnessMeter::Readings LoudnessMeter::get() const
     r.truePeakDb = aTp; r.samplePeakDb = aSp; r.momentaryMax = aMmax; r.shortTermMax = aSmax;
     r.rmsDb = aRms; r.rmsSlowDb = aRmsSlow; r.peakHoldDb = aPeakHold; r.clipped = aClip; r.momentaryFast = aMfast;
     r.integratedValid = aIvalid;
+    r.gatedSeconds = aGatedSec;
     return r;
 }
 float LoudnessMeter::takeRecentPeakDb()

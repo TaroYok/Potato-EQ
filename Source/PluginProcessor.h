@@ -63,6 +63,10 @@ public:
     arc::LoudnessMeter meter, preMeter;   // output, and after-EQ/before-gain (used by auto level)
     arc::LoudnessMeter inMeter;           // plugin input, for the In meter
     float autoLevelDb() const { return autoLevelNow.load(); }
+    // Auto level "learn, then lock": progress 0..1 while learning; locked = gain frozen (saved with the project)
+    struct LevelState { bool lockMode = false, locked = false; float progress = 0, lockedDb = 0; };
+    LevelState levelState() const;
+    void relearnLevel() { relearnRequest = true; }
     float limiterReductionDb() const { return limiterGr.load(); }
     bool sidechainActive() const { return scActive.load(); }
     float targetLufs() const;
@@ -153,6 +157,11 @@ private:
     int lastRefVersion = -1;
     void analyseReference (juce::File);
     float levelTrim = 0;
+    std::atomic<bool> levelLocked { false }, relearnRequest { false };
+    std::atomic<float> lockedDb { 0 }, lockTarget { -14 }, levelProgress { 0 };
+    std::atomic<float>* pLevelMode {};
+    double levelSettledFor = 0;
+    static constexpr float kLevelLearnSeconds = 15.0f;
     double lastTweakHash = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PotatoEQProcessor)

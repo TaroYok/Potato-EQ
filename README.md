@@ -56,7 +56,10 @@ Every push to `main` also builds the plugin; those builds are under **Actions �
 - Momentary, short-term, gated integrated LUFS, loudness range (LRA), 4×-oversampled true peak
 - Targets: Spotify/YouTube −14, Apple −16, club −9, loud −8, hip-hop/EDM −11, broadcast −23, podcast −16
 - Custom target (−30 to −5 LUFS)
-- **Auto level to target** rides the gain so the track lands on the target (works in offline renders too)
+- **Auto level to target**, two modes:
+  - **Learn, then lock** (default): listens to ~15 s of music, settles on one boost/cut and locks it (saved with the project; **Re-learn** to redo)
+  - **Ride continuously**: keeps adjusting through the song
+  - It waits for 3 s of real (non-silent) audio before acting and never raises the gain faster than 3 dB/s, so a new project can't blast
 - **Limiter**: brickwall look-ahead limiter (1.5 ms) with adjustable ceiling, so loud targets don't clip
 - **Match target** is the one-shot version. Without the limiter it never pushes the true peak above −1 dBTP
 

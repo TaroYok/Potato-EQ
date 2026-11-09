@@ -78,6 +78,9 @@ private:
     juce::TextButton unitLufs { "LUFS" }, unitDb { "dB" };   // shared LUFS / dB switch
     int lastUnits = -1;
     juce::ToggleButton autoLevel { "Auto level to target" }, limiterOn { "Limiter" };
+    juce::ComboBox levelMode;
+    juce::TextButton relearnLevel { "Re-learn" };
+    std::unique_ptr<APVTS::ComboBoxAttachment> aLevelMode;
     juce::Slider ceiling, custom;
     juce::Label ceilingL, customL;
     std::unique_ptr<APVTS::ButtonAttachment> aAutoLevel, aLimiter;

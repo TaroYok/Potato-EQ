@@ -294,6 +294,13 @@ LoudnessPanel::LoudnessPanel (PotatoEQProcessor& p) : proc (p)
     unitLufs.onClick = [this] { proc.apvts.state.setProperty (ana::units, 0, nullptr); };
     unitDb.onClick = [this] { proc.apvts.state.setProperty (ana::units, 1, nullptr); };
     aAutoLevel = std::make_unique<APVTS::ButtonAttachment> (proc.apvts, params::id::autoLevel, autoLevel);
+    fillCombo (levelMode, proc.apvts, params::id::levelMode);
+    aLevelMode = std::make_unique<APVTS::ComboBoxAttachment> (proc.apvts, params::id::levelMode, levelMode);
+    levelMode.setTooltip ("Ride continuously: keeps adjusting through the song.  Learn, then lock: listens for ~15 s of music, "
+                          "settles on one gain and keeps it (saved with the project).");
+    relearnLevel.setTooltip ("Forget the locked gain and learn again from what plays next.");
+    relearnLevel.onClick = [this] { proc.relearnLevel(); };
+    addAndMakeVisible (levelMode); addAndMakeVisible (relearnLevel);
     aLimiter = std::make_unique<APVTS::ButtonAttachment> (proc.apvts, params::id::limiter, limiterOn);
     autoLevel.setTooltip ("Continuously sets the gain so the track lands on the loudness target. Turn the limiter on for loud targets.");
     limiterOn.setTooltip ("Brickwall look-ahead limiter at the end of the chain. Catches peaks so louder targets don't clip.");
@@ -326,6 +333,8 @@ void LoudnessPanel::timerCallback()
     const bool isCustom = params::lufsTargets()[(size_t) jlimit (0, (int) params::lufsTargets().size() - 1, target.getSelectedId() - 1)].lufs > 0;
     custom.setEnabled (isCustom); customL.setEnabled (isCustom);
     ceiling.setEnabled (limiterOn.getToggleState());
+    levelMode.setEnabled (autoLevel.getToggleState());
+    relearnLevel.setEnabled (autoLevel.getToggleState() && levelMode.getSelectedItemIndex() == 1);
     if (++tick % 2 == 0)
     {
         history.push_back (lastUnits == 1 ? r.rmsDb : r.momentary);
@@ -404,7 +413,12 @@ void LoudnessPanel::paint (Graphics& g)
     }
     {
         String extra;
-        if (std::abs (proc.autoLevelDb()) > 0.05f) extra << "Auto level " << (proc.autoLevelDb() > 0 ? "+" : "") << String (proc.autoLevelDb(), 1) << " dB";
+        const auto ls = proc.levelState();
+        const bool levelOn = autoLevel.getToggleState();
+        auto sgn = [] (float v) { return (v > 0 ? "+" : "") + String (v, 1) + " dB"; };
+        if (levelOn && ls.lockMode && ls.locked) extra << "Locked " << sgn (proc.autoLevelDb());
+        else if (levelOn && ls.lockMode) extra << "Learning " << (int) (ls.progress * 100) << "%  " << sgn (proc.autoLevelDb());
+        else if (std::abs (proc.autoLevelDb()) > 0.05f) extra << "Auto level " << sgn (proc.autoLevelDb());
         if (limiterOn.getToggleState()) extra << (extra.isEmpty() ? "" : "   ") << (grShown < 0.05f ? String ("Limiter ready") : "Limiting " + String (grShown, 1) + " dB");
         row (extra.isEmpty() ? String() : String ("Gain"), extra, grShown > 3.0f ? theme::warn : theme::accent);
     }
@@ -453,6 +467,10 @@ void LoudnessPanel::resized()
     r.removeFromTop (6);
     auto t2 = r.removeFromTop (24);
     limiterOn.setBounds (t2.removeFromRight (90)); autoLevel.setBounds (t2);
+    r.removeFromTop (3);
+    auto t3 = r.removeFromTop (22);
+    relearnLevel.setBounds (t3.removeFromRight (80)); t3.removeFromRight (6); levelMode.setBounds (t3);
+    r.removeFromTop (4);
     auto cl = r.removeFromTop (20); ceilingL.setBounds (cl.removeFromLeft (90)); ceiling.setBounds (cl);
 }
 

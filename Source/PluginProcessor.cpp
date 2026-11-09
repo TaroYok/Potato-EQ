@@ -23,6 +23,7 @@ PotatoEQProcessor::PotatoEQProcessor()
     pAmount = apvts.getRawParameterValue (params::id::autoAmount);
     pTarget = apvts.getRawParameterValue (params::id::lufsTarget);
     pAutoLevel = apvts.getRawParameterValue (params::id::autoLevel);
+    pLevelMode = apvts.getRawParameterValue (params::id::levelMode);
     pLimiter = apvts.getRawParameterValue (params::id::limiter);
     pCeiling = apvts.getRawParameterValue (params::id::ceiling);
     pCustom = apvts.getRawParameterValue (params::id::lufsCustom);
@@ -199,19 +200,51 @@ void PotatoEQProcessor::processBlock (AudioBuffer<float>& fullBuffer, MidiBuffer
     {
         const double sr = fs.load();
         float lvl = autoLevelNow.load();
-        if (pAutoLevel->load() > 0.5f)
+        const bool lockMode = pLevelMode->load() > 0.5f;
+        if (relearnRequest.exchange (false))
         {
+            levelLocked = false; levelSettledFor = 0; levelProgress = 0; levelTrim = 0;
+            preMeter.reset();
+        }
+        if (pAutoLevel->load() > 0.5f && lockMode && levelLocked.load())
+        {
+            // locked: hold the learned gain; a new target shifts it by the difference (still rate-limited)
+            const float want = jlimit (-24.0f, 18.0f, lockedDb.load() + (targetLufs() - lockTarget.load()));
+            const float dt = (float) (n / sr);
+            lvl += jlimit (-12.0f * dt, 3.0f * dt, (want - lvl) * (float) (1.0 - std::exp (-n / (sr * 0.3))));
+        }
+        else if (pAutoLevel->load() > 0.5f)
+        {
+            // Only act on a trustworthy measurement: at least 3 s of non-silent audio, using the gated
+            // integrated loudness (a quiet intro or a single transient can't trigger a big jump).
+            // Gain may rise at most 3 dB/s and fall at most 12 dB/s, so changes are never sudden.
             const auto pr = preMeter.get();
-            const float in = pr.integratedValid ? pr.integrated : pr.shortTerm;
-            if (in > -60.0f)
+            if (pr.integratedValid && pr.gatedSeconds >= 3.0f && pr.integrated > -50.0f)
             {
                 const float target = targetLufs();
                 const auto outR = meter.get();
-                if (outR.shortTerm > -60.0f)   // small correction for what the limiter takes away
+                const float base = target - pr.integrated - pOut->load();
+                // small correction for what the limiter takes away, only once the gain has caught up
+                // (while it's still ramping, the output is naturally below target and the trim would overshoot)
+                if (outR.shortTerm > -50.0f && outR.gatedSeconds >= 3.0f && std::abs (base + levelTrim - lvl) < 1.0f)
                     levelTrim = jlimit (-6.0f, 6.0f, levelTrim + (float) (n / (sr * 4.0)) * (target - outR.shortTerm));
-                const float want = jlimit (-24.0f, 24.0f, target - in - pOut->load() + levelTrim);
-                lvl += (want - lvl) * (float) (1.0 - std::exp (-n / (sr * 0.8)));
+                const float want = jlimit (-24.0f, 18.0f, base + levelTrim);
+                float step = (want - lvl) * (float) (1.0 - std::exp (-n / (sr * 0.8)));
+                const float dt = (float) (n / sr);
+                step = jlimit (-12.0f * dt, 3.0f * dt, step);
+                lvl += step;
+
+                if (lockMode)
+                {   // learn: after enough music, and once the gain has settled for 2 s, freeze it
+                    levelProgress = jmin (1.0f, pr.gatedSeconds / kLevelLearnSeconds);
+                    levelSettledFor = std::abs (want - lvl) < 0.5f ? levelSettledFor + dt : 0.0;
+                    if (pr.gatedSeconds >= kLevelLearnSeconds && (levelSettledFor >= 2.0 || pr.gatedSeconds >= 2.5f * kLevelLearnSeconds))
+                    {
+                        lockedDb = lvl; lockTarget = target; levelLocked = true; levelProgress = 1.0f;
+                    }
+                }
             }
+            else if (lockMode) levelProgress = jmin (1.0f, pr.gatedSeconds / kLevelLearnSeconds);
         }
         else { lvl *= (float) std::exp (-n / (sr * 0.3)); levelTrim = 0; }
         autoLevelNow = lvl;
@@ -393,6 +426,16 @@ void PotatoEQProcessor::startLearning()
     autoResult = {};
     autoResult.curve.valid = false;
     autoResultFresh = true;
+}
+
+PotatoEQProcessor::LevelState PotatoEQProcessor::levelState() const
+{
+    LevelState l;
+    l.lockMode = pLevelMode->load() > 0.5f;
+    l.locked = levelLocked.load();
+    l.progress = levelProgress.load();
+    l.lockedDb = lockedDb.load();
+    return l;
 }
 
 PotatoEQProcessor::AutoSnapshot PotatoEQProcessor::autoSnapshot() const
@@ -694,6 +737,12 @@ void PotatoEQProcessor::getStateInformation (MemoryBlock& dest)
     }
     state.removeChild (state.getChildWithName ("Learned"), nullptr);
     state.appendChild (learn, nullptr);
+    ValueTree lvl ("LevelLock");
+    lvl.setProperty ("locked", levelLocked.load(), nullptr);
+    lvl.setProperty ("db", lockedDb.load(), nullptr);
+    lvl.setProperty ("target", lockTarget.load(), nullptr);
+    state.removeChild (state.getChildWithName ("LevelLock"), nullptr);
+    state.appendChild (lvl, nullptr);
     ValueTree ref ("Reference");
     {
         const SpinLock::ScopedLockType lock (refLock);
@@ -736,6 +785,16 @@ void PotatoEQProcessor::setStateInformation (const void* data, int size)
         learnDone = ok && (bool) learn["done"];
         learnProgress = learnDone ? 1.0f : 0.0f;
         lastProfile = -1;   // forces the curve to be rebuilt from the saved spectrum
+    }
+    auto lvl = state.getChildWithName ("LevelLock");
+    if (lvl.isValid())
+    {
+        const float db = (float) lvl["db"], tg = (float) lvl["target"];
+        const bool ok = std::isfinite (db) && std::isfinite (tg) && std::abs (db) <= 24.0f && tg > -40.0f && tg < 0.0f;
+        levelLocked = ok && (bool) lvl["locked"];
+        lockedDb = ok ? db : 0.0f; lockTarget = ok ? tg : -14.0f;
+        autoLevelNow = levelLocked.load() ? lockedDb.load() : 0.0f;   // a reloaded project starts at its locked gain
+        levelProgress = levelLocked.load() ? 1.0f : 0.0f;
     }
     auto ref = state.getChildWithName ("Reference");
     if (ref.isValid() && ref.hasProperty ("power"))

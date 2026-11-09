@@ -226,6 +226,29 @@ int main (int argc, char** argv)
     check (r.truePeakDb <= -0.7f, "true peak kept at/below -1 dBTP after matching", r.truePeakDb, -1);
 
     std::puts ("-- auto level + limiter --");
+    {   // start-up: a quiet intro must not make auto level blast the gain
+        auto pq = std::make_unique<PotatoEQProcessor>();
+        pq->setPlayConfigDetails (2, 2, 48000, 512);
+        pq->prepareToPlay (48000, 512);
+        pq->setParam (params::id::limiter, 1.0f);
+        pq->setParam (params::id::autoLevel, 1.0f);
+        AudioBuffer<float> buf (2, 512); MidiBuffer midi;
+        float maxGainFirst3s = -100, maxRise = 0, prev = 0;
+        Random rq (5);
+        for (int k = 0; k < (int) (12.0 * 48000 / 512); ++k)
+        {
+            const double t = k * 512.0 / 48000;
+            const float amp = t < 2.0 ? 0.003f : 0.1f;   // ~-50 dBFS intro, then the song
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i) buf.setSample (c, i, (rq.nextFloat() * 2 - 1) * amp);
+            pq->processBlock (buf, midi);
+            const float gnow = pq->autoLevelDb();
+            if (t < 3.0) maxGainFirst3s = jmax (maxGainFirst3s, gnow);
+            maxRise = jmax (maxRise, (gnow - prev) / (float) (512.0 / 48000));
+            prev = gnow;
+        }
+        check (maxGainFirst3s < 0.5f, "auto level does nothing in the first 3 s of a new project (max dB)", maxGainFirst3s, 0);
+        check (maxRise <= 3.05f, "auto level never rises faster than 3 dB/s", maxRise, 3);
+    }
     {
         auto pl = std::make_unique<PotatoEQProcessor>();
         pl->setPlayConfigDetails (2, 2, 48000, 512);
@@ -244,6 +267,26 @@ int main (int argc, char** argv)
         float pk = 0; for (size_t i = out.size() - 48000 * 5; i < out.size(); ++i) pk = jmax (pk, std::abs (out[i]));
         check (Decibels::gainToDecibels (pk) <= -0.99f, "limiter holds the -1 dB ceiling (sample peak)", Decibels::gainToDecibels (pk), -1);
         check (pl->autoLevelDb() > 3.0f, "auto level gain went up", pl->autoLevelDb(), 10);
+
+        // learn, then lock (the default mode): after learning the gain is frozen
+        check (pl->levelState().locked, "learn-then-lock: gain is locked after learning", pl->levelState().locked, 1);
+        const float lockedAt = pl->autoLevelDb();
+        auto louder = [&] (int n) { auto v = pinkish (n); return std::make_pair (v.first * 0.9f, v.second * 0.9f); };   // song gets ~10 dB louder
+        run (*pl, 10.0, louder);
+        check (std::abs (pl->autoLevelDb() - lockedAt) < 0.05f, "locked gain doesn't chase a louder section (dB change)", pl->autoLevelDb() - lockedAt, 0);
+        MemoryBlock lockState; pl->getStateInformation (lockState);
+        auto pr2 = std::make_unique<PotatoEQProcessor>();
+        pr2->setPlayConfigDetails (2, 2, 48000, 512);
+        pr2->setStateInformation (lockState.getData(), (int) lockState.getSize());
+        pr2->prepareToPlay (48000, 512);
+        check (pr2->levelState().locked && std::abs (pr2->autoLevelDb() - lockedAt) < 0.05f, "locked gain comes back with the project", pr2->autoLevelDb(), lockedAt);
+        pl->relearnLevel();
+        run (*pl, 0.1, louder);
+        check (! pl->levelState().locked, "Re-learn unlocks and starts over", pl->levelState().locked, 0);
+        // ride mode keeps following
+        pl->setParam (params::id::levelMode, 0.0f);
+        run (*pl, 20.0, louder);
+        check (pl->autoLevelDb() < lockedAt - 6.0f, "ride mode follows the louder section down", pl->autoLevelDb() - lockedAt, -9.5);
     }
 
     std::puts ("-- CPU load + automation stress --");

@@ -12,7 +12,7 @@ namespace id
                               analyzer = "analyzer", range = "displayRange", autoProfile = "autoProfile", autoMode = "autoMode",
                               autoAmount = "autoAmount", lufsTarget = "lufsTarget",
                               autoMaxBoost = "autoMaxBoost", autoMaxCut = "autoMaxCut", autoTilt = "autoTilt", autoBass = "autoBass",
-                              autoSmooth = "autoSmooth", experimental = "experimental", autoLevel = "autoLevel", limiter = "limiter", ceiling = "ceiling", lufsCustom = "lufsCustom";
+                              autoSmooth = "autoSmooth", experimental = "experimental", autoLevel = "autoLevel", levelMode = "levelMode", limiter = "limiter", ceiling = "ceiling", lufsCustom = "lufsCustom";
 }
 
 enum AutoMode { autoOff = 0, autoLearn, autoLive };
@@ -72,6 +72,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat> (pid (id::autoBass), "Auto EQ Low End", NormalisableRange<float> (-6.f, 6.f, 0.1f), 0.f, dbAttr));
     l.add (std::make_unique<AudioParameterChoice> (pid (id::autoSmooth), "Auto EQ Detail", StringArray { "Broad", "Medium", "Fine" }, 1));
     l.add (std::make_unique<AudioParameterBool> (pid (id::autoLevel), "Auto Level", false));
+    l.add (std::make_unique<AudioParameterChoice> (pid (id::levelMode), "Auto Level Mode", StringArray { "Ride continuously", "Learn, then lock" }, 1));
     l.add (std::make_unique<AudioParameterBool> (pid (id::limiter), "Limiter", false));
     l.add (std::make_unique<AudioParameterFloat> (pid (id::ceiling), "Limiter Ceiling", NormalisableRange<float> (-6.f, 0.f, 0.1f), -1.f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " dB"; })));
