@@ -140,7 +140,7 @@ jobs:
           for d in */; do case "$d" in *-Installer/) for f in "$d"*; do case "$f" in *SHA256SUMS.txt) cat "$f" >> SHA256SUMS.txt ;; *) mv "$f" . ;; esac; done ;; *) (cd "$d" && zip -qr "../${d%/}.zip" .) ;; esac; done
           sha256sum *.zip >> SHA256SUMS.txt
           ls -la; cat SHA256SUMS.txt
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ steps.rel.outputs.tag }}
           name: ${{ steps.rel.outputs.name }}
