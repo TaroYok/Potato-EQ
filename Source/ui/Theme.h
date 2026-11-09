@@ -20,6 +20,7 @@ inline Colour accent    { 0xff2f8bff };   // iPhone OS blue
 inline Colour accent2   { 0xff4cd964 };   // iOS green
 inline const Colour potato    { 0xfff2c14e };   // logo gold
 inline const Colour autoCol   { 0xffffa94d };
+inline const Colour specCol   { 0xff4ff0d8 };   // spectral dynamics (aqua)
 inline const Colour good      { 0xff7cf29a };
 inline const Colour warn      { 0xffffd166 };
 inline const Colour bad       { 0xffff6b6b };

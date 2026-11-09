@@ -1,6 +1,7 @@
 // Offline checks for the Potato EQ DSP (filters, engine, loudness meter, auto-EQ).
 #include "dsp/AutoEq.h"
 #include "dsp/Loudness.h"
+#include "dsp/Spectral.h"
 #include <cstdio>
 #include <functional>
 #include <random>
@@ -23,6 +24,45 @@ static double runSineRmsDb (EqEngine& eq, double f, double fs, double amp = 0.25
     for (int off = 0; off < n; off += 512) { float* p[2] = { io[0] + off, io[1] + off }; eq.process (p, ch, std::min (512, n - off)); }
     double s = 0; for (int i = n / 2; i < n; ++i) s += (double) L[(size_t) i] * L[(size_t) i];
     return 10 * std::log10 (s / (n / 2)) - 20 * std::log10 (amp / std::sqrt (2.0));
+}
+
+// ---- spectral dynamics helpers
+// amplitude of one frequency in x[start, start+len) (correlation; len should hold whole periods-ish)
+static double toneAmp (const std::vector<float>& x, double f, double fs, int start, int len)
+{
+    double c = 0, s = 0;
+    for (int i = 0; i < len; ++i) { const double ph = 2 * kPi * f * (start + i) / fs; c += x[(size_t) (start + i)] * std::cos (ph); s += x[(size_t) (start + i)] * std::sin (ph); }
+    return 2.0 * std::sqrt (c * c + s * s) / len;
+}
+// average power (dB) between f0 and f1, skipping [skip0, skip1] (Welch, 4096-point Hann frames)
+static double bandPowerDb (const std::vector<float>& x, double fs, int start, double f0, double f1, double skip0 = 0, double skip1 = 0)
+{
+    Fft fft; fft.init (4096);
+    std::vector<std::complex<float>> buf (4096);
+    double p = 0; int frames = 0;
+    for (int off = start; off + 4096 <= (int) x.size(); off += 2048, ++frames)
+    {
+        for (int i = 0; i < 4096; ++i) buf[(size_t) i] = { x[(size_t) (off + i)] * (float) (0.5 - 0.5 * std::cos (2 * kPi * i / 4096)), 0.0f };
+        fft.run (buf.data(), false);
+        for (int k = 1; k < 2048; ++k) { const double f = k * fs / 4096; if (f >= f0 && f <= f1 && ! (f >= skip0 && f <= skip1)) p += std::norm (buf[(size_t) k]); }
+    }
+    return 10 * std::log10 (p / std::max (1, frames) + 1e-30);
+}
+static void runSpectral (SpectralDynamics& sd, std::vector<float>& L, std::vector<float>& R, const std::vector<float>* sc = nullptr)
+{
+    for (int off = 0; off < (int) L.size(); off += 480)
+    {
+        const int n = std::min (480, (int) L.size() - off);
+        float* io[2] = { L.data() + off, R.data() + off };
+        const float* s[1] = { sc ? sc->data() + off : nullptr };
+        sd.process (io, 2, n, sc ? s : nullptr, sc ? 1 : 0);
+    }
+}
+static BandSettings spectralBand (BandType t, double f, double q, double range)
+{
+    BandSettings b; b.used = true; b.type = t; b.freq = f; b.q = q; b.gainDb = 0; b.slope = 12;
+    b.dynamic = true; b.spectral = true; b.rangeDb = range; b.thresholdDb = -30;
+    return b;
 }
 
 int main()
@@ -223,6 +263,131 @@ int main()
         auto r = computeAutoEq (pw, voc, fs);
         check (autoCurveDb (r.curve, 1, 40, fs) < 0.01, "vocal: no boost where there's no content", autoCurveDb (r.curve, 1, 40, fs), 0);
         near ("vocal: high-pass suggested at", r.curve.hpfHz, 80, 0.1);
+    }
+
+    // ======================== spectral dynamics
+    std::printf ("\n-- spectral dynamics\n");
+    {
+        const int n = (int) fs * 4;
+        std::mt19937 rng (7); std::normal_distribution<float> nd (0.0f, 1.0f);
+        std::vector<float> noise ((size_t) n);
+        for (auto& v : noise) v = 0.02f * nd (rng);   // about -34 dBFS white noise
+        auto withTone = [&] (double f, double amp) { std::vector<float> v = noise; for (int i = 0; i < n; ++i) v[(size_t) i] += (float) (amp * std::sin (2 * kPi * f * i / fs)); return v; };
+
+        for (int res = 0; res < 3; ++res)
+        {   // transparent and exactly delayed when nothing triggers
+            SpectralDynamics sd; sd.prepare (fs); sd.setResolution (res);
+            std::array<BandSettings, kNumBands> bs {};
+            bs[0] = spectralBand (BandType::Bell, 3000, 1, -12); bs[0].specAuto = false; bs[0].thresholdDb = 20;   // never reached
+            sd.setBands (bs);
+            auto L = noise, R = noise; for (auto& v : R) v *= -0.5f;
+            runSpectral (sd, L, R);
+            const int lat = sd.latency();
+            double err = 0;
+            for (int i = lat + 4096; i < n; ++i) err = std::max (err, (double) std::abs (L[(size_t) i] - noise[(size_t) (i - lat)]) + std::abs (R[(size_t) i] + 0.5f * noise[(size_t) (i - lat)]));
+            char what[96]; std::snprintf (what, sizeof what, "transparent + delayed by latency (%d), max error", lat);
+            check (err < 1e-4, what, err, 0);
+        }
+        {   // auto: a resonance sticking out of the band is pulled down, the rest of the band is left alone
+            SpectralDynamics sd; sd.prepare (fs);
+            std::array<BandSettings, kNumBands> bs {}; bs[0] = spectralBand (BandType::Bell, 3000, 0.7, -12); sd.setBands (bs);
+            const auto in = withTone (3150, 0.1);   // a ring at 3.15 kHz, 20 dB above the noise
+            auto L = in, R = in; runSpectral (sd, L, R);
+            const int lat = sd.latency(), st = (int) fs * 2;
+            const double cut = 20 * std::log10 (toneAmp (L, 3150, fs, st, 48000) / toneAmp (in, 3150, fs, st - lat, 48000));
+            check (cut < -4.0 && cut > -12.5, "auto: resonance at 3.15 kHz reduced (dB)", cut, -6);
+            const double rest = bandPowerDb (L, fs, st, 1800, 5000, 2900, 3400) - bandPowerDb (in, fs, st - lat, 1800, 5000, 2900, 3400);
+            check (std::abs (rest) < 1.0, "auto: rest of the band untouched (dB)", rest, 0);
+            const double outside = toneAmp (L, 3150, fs, st, 48000);
+            (void) outside;
+            check (sd.activity (0) < -3.0, "activity reported for the display (dB)", sd.activity (0), -6);
+        }
+        {   // auto on a smooth, mix-like (pink) spectrum: nothing sticks out, so almost nothing happens
+            std::mt19937 r2 (11); std::normal_distribution<float> g2 (0.0f, 1.0f);
+            std::vector<float> pink ((size_t) n);
+            double b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+            for (auto& v : pink)
+            {   // Paul Kellet's pink filter
+                const double w = g2 (r2);
+                b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.96900 * b2 + w * 0.1538520;
+                b3 = 0.86650 * b3 + w * 0.3104856; b4 = 0.55000 * b4 - w * 0.5329522; b5 = -0.7616 * b5 - w * 0.0168980;
+                v = (float) (0.02 * (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362)); b6 = w * 0.115926;
+            }
+            for (auto t : { BandType::Bell, BandType::HighShelf })
+            {
+                SpectralDynamics sd; sd.prepare (fs);
+                std::array<BandSettings, kNumBands> bs {}; bs[0] = spectralBand (t, t == BandType::Bell ? 2500 : 5000, 0.7, -12); sd.setBands (bs);
+                auto L = pink, R = pink; runSpectral (sd, L, R);
+                const int lat = sd.latency(), st = (int) fs * 2;
+                const double d = bandPowerDb (L, fs, st, 1000, 18000) - bandPowerDb (pink, fs, st - lat, 1000, 18000);
+                check (std::abs (d) < 1.0, t == BandType::Bell ? "auto bell on pink noise: barely acts (dB)" : "auto high shelf on pink noise: barely acts (dB)", d, 0);
+            }
+        }
+        {   // tones outside the band's shape are never touched
+            SpectralDynamics sd; sd.prepare (fs);
+            std::array<BandSettings, kNumBands> bs {}; bs[0] = spectralBand (BandType::HighShelf, 6000, 0.7, -12); sd.setBands (bs);
+            const auto in = withTone (300, 0.3);
+            auto L = in, R = in; runSpectral (sd, L, R);
+            const int lat = sd.latency(), st = (int) fs * 2;
+            const double d = 20 * std::log10 (toneAmp (L, 300, fs, st, 48000) / toneAmp (in, 300, fs, st - lat, 48000));
+            check (std::abs (d) < 0.2, "loud 300 Hz tone ignored by a 6 kHz shelf (dB)", d, 0);
+        }
+        {   // manual threshold: below it nothing happens, above it the excess is reduced 2:1 up to the range
+            for (double thr : { 0.0, -40.0 })
+            {
+                SpectralDynamics sd; sd.prepare (fs);
+                std::array<BandSettings, kNumBands> bs {}; bs[0] = spectralBand (BandType::Bell, 2000, 1, -9);
+                bs[0].specAuto = false; bs[0].thresholdDb = thr; bs[0].specTilt = false; sd.setBands (bs);
+                const auto in = withTone (2000, 0.1);   // -20 dBFS tone
+                auto L = in, R = in; runSpectral (sd, L, R);
+                const int lat = sd.latency(), st = (int) fs * 2;
+                const double d = 20 * std::log10 (toneAmp (L, 2000, fs, st, 48000) / toneAmp (in, 2000, fs, st - lat, 48000));
+                if (thr == 0.0) check (std::abs (d) < 0.2, "manual: tone below threshold untouched (dB)", d, 0);
+                else check (d < -7.5 && d > -9.6, "manual: 20 dB over threshold -> range-limited cut (dB)", d, -9);
+            }
+        }
+        {   // positive range expands upward
+            SpectralDynamics sd; sd.prepare (fs);
+            std::array<BandSettings, kNumBands> bs {}; bs[0] = spectralBand (BandType::Bell, 2000, 1, 6);
+            bs[0].specAuto = false; bs[0].thresholdDb = -40; bs[0].specTilt = false; sd.setBands (bs);
+            const auto in = withTone (2000, 0.1);
+            auto L = in, R = in; runSpectral (sd, L, R);
+            const int lat = sd.latency(), st = (int) fs * 2;
+            const double d = 20 * std::log10 (toneAmp (L, 2000, fs, st, 48000) / toneAmp (in, 2000, fs, st - lat, 48000));
+            check (d > 4.5 && d < 6.5, "positive range boosts what crosses the threshold (dB)", d, 6);
+        }
+        {   // sidechain: triggers on the other signal
+            for (bool loudKey : { false, true })
+            {
+                SpectralDynamics sd; sd.prepare (fs);
+                std::array<BandSettings, kNumBands> bs {}; bs[0] = spectralBand (BandType::Bell, 2000, 1, -8);
+                bs[0].specAuto = false; bs[0].thresholdDb = -30; bs[0].specTilt = false; bs[0].sidechain = true; sd.setBands (bs);
+                std::vector<float> in ((size_t) n), key ((size_t) n);
+                for (int i = 0; i < n; ++i) { in[(size_t) i] = (float) (0.05 * std::sin (2 * kPi * 2000 * i / fs)); key[(size_t) i] = loudKey ? (float) (0.3 * std::sin (2 * kPi * 2000 * i / fs)) : 0.0f; }
+                auto L = in, R = in; runSpectral (sd, L, R, &key);
+                const int lat = sd.latency(), st = (int) fs * 2;
+                const double d = 20 * std::log10 (toneAmp (L, 2000, fs, st, 48000) / toneAmp (in, 2000, fs, st - lat, 48000));
+                if (loudKey) check (d < -6.0, "sidechain: loud key ducks the track (dB)", d, -8);
+                else check (std::abs (d) < 0.2, "sidechain: quiet key leaves the track alone (dB)", d, 0);
+            }
+        }
+        {   // mid-only band leaves the side signal alone
+            SpectralDynamics sd; sd.prepare (fs);
+            std::array<BandSettings, kNumBands> bs {}; bs[0] = spectralBand (BandType::Bell, 2000, 1, -9);
+            bs[0].specAuto = false; bs[0].thresholdDb = -40; bs[0].specTilt = false; bs[0].place = Placement::Mid; sd.setBands (bs);
+            std::vector<float> L ((size_t) n), R ((size_t) n);
+            for (int i = 0; i < n; ++i) { const float m = (float) (0.1 * std::sin (2 * kPi * 2000 * i / fs)), sd2 = (float) (0.1 * std::sin (2 * kPi * 2500 * i / fs)); L[(size_t) i] = m + sd2; R[(size_t) i] = m - sd2; }
+            auto inL = L, inR = R;
+            runSpectral (sd, L, R);
+            const int lat = sd.latency(), st = (int) fs * 2;
+            std::vector<float> M ((size_t) n), S ((size_t) n), inS ((size_t) n), inM ((size_t) n);
+            for (int i = 0; i < n; ++i) { M[(size_t) i] = 0.5f * (L[(size_t) i] + R[(size_t) i]); S[(size_t) i] = 0.5f * (L[(size_t) i] - R[(size_t) i]);
+                                          inM[(size_t) i] = 0.5f * (inL[(size_t) i] + inR[(size_t) i]); inS[(size_t) i] = 0.5f * (inL[(size_t) i] - inR[(size_t) i]); }
+            const double dm = 20 * std::log10 (toneAmp (M, 2000, fs, st, 48000) / toneAmp (inM, 2000, fs, st - lat, 48000));
+            const double ds = 20 * std::log10 (toneAmp (S, 2500, fs, st, 48000) / toneAmp (inS, 2500, fs, st - lat, 48000));
+            check (dm < -7.0, "mid-only: mid tone reduced (dB)", dm, -9);
+            check (std::abs (ds) < 0.3, "mid-only: side tone untouched (dB)", ds, 0);
+        }
     }
 
     std::printf ("\n%s (%d failure%s)\n", failures ? "SOME TESTS FAILED" : "ALL TESTS PASSED", failures, failures == 1 ? "" : "s");

@@ -187,6 +187,29 @@ BandPanel::BandPanel (PotatoEQProcessor& p) : proc (p)
     range.slider.setColour (Slider::rotarySliderFillColourId, theme::autoCol);
     del.onClick = [this] { if (band >= 0 && onDelete) onDelete (band); };
     dyn.setTooltip ("Dynamic EQ: the band only moves when its frequency range gets louder than the threshold.");
+    for (auto* b : { &spec, &specAuto, &specTilt }) addAndMakeVisible (*b);
+    for (auto* k : { &atk, &rel, &dens }) { addAndMakeVisible (*k); k->slider.setColour (Slider::rotarySliderFillColourId, theme::specCol); }
+    addAndMakeVisible (specRes);
+    fillCombo (specRes, proc.apvts, params::id::specRes);
+    aSpecRes = std::make_unique<APVTS::ComboBoxAttachment> (proc.apvts, params::id::specRes, specRes);
+    spec.setTooltip ("Spectral dynamics: instead of turning the whole band down, only the frequencies inside it that poke "
+                     "above the threshold are reduced (or boosted with a positive range). Great for harsh vocals and ringing guitars. "
+                     "Adds a little latency (see Resolution).");
+    spec.onClick = [this]
+    {
+        if (band < 0 || ! spec.getToggleState()) return;
+        proc.setParam (params::bandId (band, "dyn"), 1.0f);   // spectral is a kind of dynamic band
+        if (std::abs (proc.bandSettings (band).rangeDb) < 0.5) proc.setParam (params::bandId (band, "range"), -6.0f);
+    };
+    specAuto.setTooltip ("Auto: threshold, attack and release follow the audio. The band reacts to frequencies that stick out "
+                         "about 5 dB above its own typical level.");
+    specTilt.setTooltip ("Spectral tilt: adds 3 dB/oct before detection so higher frequencies trigger a little more easily. "
+                         "Natural on full mixes, whose spectrum falls toward the top.");
+    specRes.setTooltip ("Spectral resolution (all spectral bands): higher is more precise in the lows but adds more latency. "
+                        "Low or Medium is fine for most work above 1 kHz.");
+    atk.slider.setTooltip ("How fast a frequency is pulled down once it crosses the threshold.");
+    rel.slider.setTooltip ("How fast it recovers afterwards.");
+    dens.slider.setTooltip ("Density: low = wider areas react together (smoother), high = only narrow, specific frequencies react.");
     setBand (-1);
     startTimerHz (10);
 }
@@ -196,6 +219,7 @@ BandPanel::~BandPanel() { stopTimer(); }
 void BandPanel::setBand (int b)
 {
     aType.reset(); aSlope.reset(); aPlace.reset(); aFreq.reset(); aGain.reset(); aQ.reset(); aThr.reset(); aRange.reset(); aDyn.reset(); aBypass.reset(); aSc.reset();
+    aSpec.reset(); aSpecAuto.reset(); aSpecTilt.reset(); aAtk.reset(); aRel.reset(); aDens.reset();
     band = b;
     for (int i = 0; i < getNumChildComponents(); ++i) getChildComponent (i)->setVisible (b >= 0);
     if (b >= 0)
@@ -213,6 +237,12 @@ void BandPanel::setBand (int b)
         aDyn = std::make_unique<APVTS::ButtonAttachment> (s, params::bandId (b, "dyn"), dyn);
         aBypass = std::make_unique<APVTS::ButtonAttachment> (s, params::bandId (b, "bypass"), bypass);
         aSc = std::make_unique<APVTS::ButtonAttachment> (s, params::bandId (b, "sc"), sc);
+        aSpec = std::make_unique<APVTS::ButtonAttachment> (s, params::bandId (b, "spec"), spec);
+        aSpecAuto = std::make_unique<APVTS::ButtonAttachment> (s, params::bandId (b, "specAuto"), specAuto);
+        aSpecTilt = std::make_unique<APVTS::ButtonAttachment> (s, params::bandId (b, "specTilt"), specTilt);
+        aAtk = std::make_unique<APVTS::SliderAttachment> (s, params::bandId (b, "specAtk"), atk.slider);
+        aRel = std::make_unique<APVTS::SliderAttachment> (s, params::bandId (b, "specRel"), rel.slider);
+        aDens = std::make_unique<APVTS::SliderAttachment> (s, params::bandId (b, "specDens"), dens.slider);
         const auto c = theme::bandColour (b);
         for (auto* k : { &freq, &gain, &q }) k->slider.setColour (Slider::rotarySliderFillColourId, c);
         timerCallback();
@@ -229,7 +259,11 @@ void BandPanel::timerCallback()
     slope.setEnabled (arc::typeHasSlope (s.type));
     dyn.setEnabled (arc::typeSupportsDynamic (s.type));
     const bool dynOn = s.dynamic && arc::typeSupportsDynamic (s.type);
-    thr.setEnabled (dynOn); range.setEnabled (dynOn); sc.setEnabled (dynOn);
+    const bool specOn = dynOn && s.spectral;
+    thr.setEnabled (dynOn && ! (specOn && s.specAuto)); range.setEnabled (dynOn); sc.setEnabled (dynOn);
+    spec.setEnabled (arc::typeSupportsDynamic (s.type));
+    for (Component* c : { (Component*) &specAuto, (Component*) &specTilt, (Component*) &specRes, (Component*) &dens }) c->setEnabled (specOn);
+    atk.setEnabled (specOn && ! s.specAuto); rel.setEnabled (specOn && ! s.specAuto);
     repaint();
 }
 
@@ -252,10 +286,15 @@ void BandPanel::paint (Graphics& g)
     g.drawText ("Band " + String (band + 1), r.getX() + 16, r.getY(), 70, 16, Justification::centredLeft);
     const auto s = proc.bandSettings (band);
     g.setColour (theme::textDim); g.setFont (theme::font (11.0f));
-    String info = theme::noteName (s.freq);
-    const float d = proc.dynamicDelta (band);
-    if (std::abs (d) > 0.05f) info << "   dyn " << String (d, 1) << " dB";
-    g.drawText (info, r.getX() + 84, r.getY(), 120, 16, Justification::centredLeft);
+    g.drawText (theme::noteName (s.freq), r.getX() + 72, r.getY(), 76, 16, Justification::centredLeft);
+    // what the dynamics are doing right now (under the spectral controls)
+    if (s.dynamic && arc::typeSupportsDynamic (s.type))
+    {
+        const float d = s.isSpectral() ? proc.spectralDynamics().activity (band) : proc.dynamicDelta (band);
+        g.setColour (std::abs (d) > 0.05f ? (s.isSpectral() ? theme::specCol : theme::autoCol) : theme::textDim);
+        g.setFont (theme::font (10.5f));
+        g.drawText ("now " + String (d > 0 ? "+" : "") + String (d, 1) + " dB", specRes.getBounds().translated (0, 21).withHeight (14), Justification::centred);
+    }
 }
 
 void BandPanel::resized()
@@ -272,6 +311,14 @@ void BandPanel::resized()
     dcol.removeFromTop (3); del.setBounds (dcol.removeFromTop (20));
     r.removeFromLeft (4);
     for (auto* k : { &thr, &range }) k->setBounds (r.removeFromLeft (72));
+    r.removeFromLeft (10);
+    auto scol = r.removeFromLeft (112).withTrimmedTop (2);
+    spec.setBounds (scol.removeFromTop (22));
+    auto row = scol.removeFromTop (22);
+    specAuto.setBounds (row.removeFromLeft (56)); specTilt.setBounds (row);
+    scol.removeFromTop (4); specRes.setBounds (scol.removeFromTop (22));
+    r.removeFromLeft (4);
+    for (auto* k : { &atk, &rel, &dens }) k->setBounds (r.removeFromLeft (68));
 }
 
 // ---------------------------------------------------------------- loudness panel

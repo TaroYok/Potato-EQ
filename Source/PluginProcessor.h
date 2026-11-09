@@ -4,6 +4,7 @@
 #include "Params.h"
 #include "dsp/Loudness.h"
 #include "dsp/Limiter.h"
+#include "dsp/Spectral.h"
 
 // Lock-free mono sample FIFO from the audio thread to the analyzer display.
 class SampleFifo
@@ -74,6 +75,9 @@ public:
 
     arc::BandSettings bandSettings (int b) const { return bandParams[(size_t) b].read(); }
     float dynamicDelta (int b) const { return engine.dynamicDelta (b); }
+    // spectral dynamics (display)
+    const arc::SpectralDynamics& spectralDynamics() const { return spectral; }
+    bool spectralActive() const { return specActive.load(); }
 
     struct AutoSnapshot { arc::AutoResult result; float progress = 0; bool learning = false; };
     AutoSnapshot autoSnapshot() const;
@@ -134,6 +138,10 @@ private:
     std::atomic<float> autoGainNow { 0 }, autoLevelNow { 0 }, limiterGr { 0 };
     std::atomic<bool> scActive { false };
     arc::Limiter limiter;
+    arc::SpectralDynamics spectral;
+    std::atomic<bool> specActive { false };
+    int specResShown = -1;
+    std::atomic<float>* pSpecRes {};
     std::atomic<float>* pAutoLevel {}; std::atomic<float>* pLimiter {}; std::atomic<float>* pCeiling {}; std::atomic<float>* pCustom {};
     std::atomic<float>* pExperimental {};
     std::atomic<float>* pMaxBoost {}; std::atomic<float>* pMaxCut {}; std::atomic<float>* pTilt {}; std::atomic<float>* pBass {}; std::atomic<float>* pSmooth {};

@@ -12,7 +12,7 @@ namespace id
                               analyzer = "analyzer", range = "displayRange", autoProfile = "autoProfile", autoMode = "autoMode",
                               autoAmount = "autoAmount", lufsTarget = "lufsTarget",
                               autoMaxBoost = "autoMaxBoost", autoMaxCut = "autoMaxCut", autoTilt = "autoTilt", autoBass = "autoBass",
-                              autoSmooth = "autoSmooth", experimental = "experimental", autoLevel = "autoLevel", levelMode = "levelMode", limiter = "limiter", ceiling = "ceiling", lufsCustom = "lufsCustom";
+                              autoSmooth = "autoSmooth", experimental = "experimental", autoLevel = "autoLevel", levelMode = "levelMode", limiter = "limiter", ceiling = "ceiling", lufsCustom = "lufsCustom", specRes = "specRes";
 }
 
 enum AutoMode { autoOff = 0, autoLearn, autoLive };
@@ -79,6 +79,9 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat> (pid (id::lufsCustom), "Custom Loudness Target", NormalisableRange<float> (-30.f, -5.f, 0.1f), -14.f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " LUFS"; })));
 
+    l.add (std::make_unique<AudioParameterChoice> (pid (id::specRes), "Spectral Resolution",
+                                                   StringArray { "Low (21 ms)", "Medium (43 ms)", "High (85 ms)" }, 1));
+
     StringArray types, slopes, places;
     for (int i = 0; i < (int) arc::BandType::Count; ++i) types.add (arc::bandTypeName ((arc::BandType) i));
     for (int s : arc::kSlopes) slopes.add (String (s) + " dB/oct");
@@ -103,6 +106,15 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         group->addChild (std::make_unique<AudioParameterFloat> (pid (bandId (b, "thr")), n + "Threshold", NormalisableRange<float> (-80.f, 0.f, 0.1f), -30.f, dbAttr));
         group->addChild (std::make_unique<AudioParameterFloat> (pid (bandId (b, "range")), n + "Range", NormalisableRange<float> (-24.f, 24.f, 0.1f), -6.f, dbAttr));
         group->addChild (std::make_unique<AudioParameterBool> (pid (bandId (b, "sc")), n + "Sidechain", false));
+        group->addChild (std::make_unique<AudioParameterBool> (pid (bandId (b, "spec")), n + "Spectral", false));
+        group->addChild (std::make_unique<AudioParameterBool> (pid (bandId (b, "specAuto")), n + "Spectral Auto", true));
+        group->addChild (std::make_unique<AudioParameterBool> (pid (bandId (b, "specTilt")), n + "Spectral Tilt", true));
+        group->addChild (std::make_unique<AudioParameterFloat> (pid (bandId (b, "specAtk")), n + "Attack", logRange (1.f, 500.f), 10.f,
+            AudioParameterFloatAttributes().withLabel ("ms").withStringFromValueFunction ([] (float v, int) { return String (v, v < 10 ? 1 : 0) + " ms"; })));
+        group->addChild (std::make_unique<AudioParameterFloat> (pid (bandId (b, "specRel")), n + "Release", logRange (10.f, 2000.f), 120.f,
+            AudioParameterFloatAttributes().withLabel ("ms").withStringFromValueFunction ([] (float v, int) { return String (v, 0) + " ms"; })));
+        group->addChild (std::make_unique<AudioParameterFloat> (pid (bandId (b, "specDens")), n + "Density", NormalisableRange<float> (0.f, 100.f, 0.1f), 50.f,
+            AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction ([] (float v, int) { return String (v, 0) + " %"; })));
         l.add (std::move (group));
     }
     return l;
@@ -114,6 +126,8 @@ struct BandParams
     std::atomic<float>* used {}; std::atomic<float>* bypass {}; std::atomic<float>* type {}; std::atomic<float>* freq {};
     std::atomic<float>* gain {}; std::atomic<float>* q {}; std::atomic<float>* slope {}; std::atomic<float>* place {};
     std::atomic<float>* dyn {}; std::atomic<float>* thr {}; std::atomic<float>* range {}; std::atomic<float>* sc {};
+    std::atomic<float>* spec {}; std::atomic<float>* specAuto {}; std::atomic<float>* specTilt {};
+    std::atomic<float>* specAtk {}; std::atomic<float>* specRel {}; std::atomic<float>* specDens {};
 
     void attach (juce::AudioProcessorValueTreeState& s, int b)
     {
@@ -123,6 +137,9 @@ struct BandParams
         slope = s.getRawParameterValue (bandId (b, "slope")); place = s.getRawParameterValue (bandId (b, "place"));
         dyn = s.getRawParameterValue (bandId (b, "dyn")); thr = s.getRawParameterValue (bandId (b, "thr"));
         range = s.getRawParameterValue (bandId (b, "range")); sc = s.getRawParameterValue (bandId (b, "sc"));
+        spec = s.getRawParameterValue (bandId (b, "spec")); specAuto = s.getRawParameterValue (bandId (b, "specAuto"));
+        specTilt = s.getRawParameterValue (bandId (b, "specTilt")); specAtk = s.getRawParameterValue (bandId (b, "specAtk"));
+        specRel = s.getRawParameterValue (bandId (b, "specRel")); specDens = s.getRawParameterValue (bandId (b, "specDens"));
     }
 
     arc::BandSettings read() const
@@ -134,6 +151,8 @@ struct BandParams
         b.slope = arc::kSlopes[(size_t) juce::jlimit (0, (int) arc::kSlopes.size() - 1, (int) slope->load())];
         b.place = (arc::Placement) juce::jlimit (0, (int) arc::Placement::Count - 1, (int) place->load());
         b.dynamic = dyn->load() > 0.5f; b.thresholdDb = thr->load(); b.rangeDb = range->load(); b.sidechain = sc->load() > 0.5f;
+        b.spectral = spec->load() > 0.5f; b.specAuto = specAuto->load() > 0.5f; b.specTilt = specTilt->load() > 0.5f;
+        b.specAttackMs = specAtk->load(); b.specReleaseMs = specRel->load(); b.specDensity = specDens->load() / 100.0;
         return b;
     }
 };

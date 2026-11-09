@@ -167,7 +167,7 @@ private:
 
         // dynamic EQ: listen to this band's region of the incoming signal
         double delta = 0.0;
-        if (t.dynamic && typeSupportsDynamic (t.type))
+        if (t.dynamic && ! t.spectral && typeSupportsDynamic (t.type))   // spectral bands: dynamics run in SpectralDynamics
         {
             b.det = detectorSection (b.cur, fs);
             double env = b.env;

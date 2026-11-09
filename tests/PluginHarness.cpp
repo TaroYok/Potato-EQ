@@ -349,6 +349,82 @@ int main (int argc, char** argv)
         check (firPct < 15.0, "linear-phase worst case CPU (% of one core)", firPct, 15);
     }
 
+    std::puts ("-- spectral dynamics --");
+    {
+        auto ps = std::make_unique<PotatoEQProcessor>();
+        ps->setPlayConfigDetails (2, 2, 48000, 512);
+        ps->prepareToPlay (48000, 512);
+        AudioBuffer<float> one (2, 512); MidiBuffer mm;
+        ps->processBlock (one, mm);
+        const int base = ps->getLatencySamples();
+        ps->setParam (params::bandId (0, "type"), (float) arc::BandType::Bell);
+        ps->setParam (params::bandId (0, "freq"), 3000.0f);
+        ps->setParam (params::bandId (0, "q"), 0.7f);
+        ps->setParam (params::bandId (0, "dyn"), 1.0f);
+        ps->setParam (params::bandId (0, "range"), -12.0f);
+        ps->setParam (params::bandId (0, "spec"), 1.0f);
+        ps->setParam (params::bandId (0, "used"), 1.0f);
+        ps->processBlock (one, mm);
+        check (ps->getLatencySamples() == base + 2048, "spectral band adds its FFT size to the latency (Medium)", ps->getLatencySamples() - base, 2048);
+        Random rr (5);
+        auto ring = [&] (int n) { const float v = 0.02f * (rr.nextFloat() * 2 - 1) * 1.7f + (float) (0.1 * std::sin (2 * MathConstants<double>::pi * 3150 * n / 48000)); return std::make_pair (v, v); };
+        std::vector<float> out;
+        run (*ps, 4.0, ring, &out);
+        double c = 0, sn = 0; const int st = 48000 * 2, len = 48000;
+        for (int i = 0; i < len; ++i) { const double ph = 2 * MathConstants<double>::pi * 3150 * (st + i) / 48000; c += out[(size_t) (st + i)] * std::cos (ph); sn += out[(size_t) (st + i)] * std::sin (ph); }
+        const double amp = 2 * std::sqrt (c * c + sn * sn) / len;
+        const double cut = 20 * std::log10 (amp / 0.1);
+        check (cut < -3.0, "auto spectral band tames a 3.15 kHz ring in the plugin (dB)", cut, -6);
+        check (ps->spectralDynamics().activity (0) < -2.0f, "display sees the band working (dB)", ps->spectralDynamics().activity (0), -6);
+        ps->setParam (params::id::specRes, 2.0f);
+        ps->processBlock (one, mm);
+        check (ps->getLatencySamples() == base + 4096, "High resolution: 4096 samples", ps->getLatencySamples() - base, 4096);
+        // saved and restored with the project
+        MemoryBlock mb; ps->getStateInformation (mb);
+        auto pr = std::make_unique<PotatoEQProcessor>(); pr->setStateInformation (mb.getData(), (int) mb.getSize());
+        check (pr->bandSettings (0).isSpectral() && (int) pr->apvts.getRawParameterValue (params::id::specRes)->load() == 2, "spectral settings come back with the project", 1, 1);
+        ps->setParam (params::bandId (0, "spec"), 0.0f);
+        ps->processBlock (one, mm);
+        check (ps->getLatencySamples() == base, "latency drops back when no band is spectral", ps->getLatencySamples() - base, 0);
+
+        // CPU: 8 spectral bands (High resolution) + 16 normal ones + the rest switched on
+        for (int b = 0; b < arc::kNumBands; ++b)
+        {
+            ps->setParam (params::bandId (b, "type"), (float) (b % 3 == 0 ? arc::BandType::HighShelf : arc::BandType::Bell));
+            ps->setParam (params::bandId (b, "freq"), (float) (40.0 * std::pow (400.0, b / 23.0)));
+            ps->setParam (params::bandId (b, "q"), 1.0f);
+            ps->setParam (params::bandId (b, "gain"), b % 2 ? 2.0f : -2.0f);
+            ps->setParam (params::bandId (b, "dyn"), 1.0f);
+            ps->setParam (params::bandId (b, "spec"), b % 3 == 0 ? 1.0f : 0.0f);
+            ps->setParam (params::bandId (b, "specAuto"), b % 2 ? 1.0f : 0.0f);
+            ps->setParam (params::bandId (b, "place"), (float) (b % 5));
+            ps->setParam (params::bandId (b, "used"), 1.0f);
+        }
+        ps->setParam (params::id::limiter, 1.0f);
+        const double secs = 10.0;
+        auto t0 = Time::getMillisecondCounterHiRes();
+        run (*ps, secs, pinkish);
+        const double pct = 100.0 * (Time::getMillisecondCounterHiRes() - t0) / (secs * 1000.0);
+        std::printf ("      8 spectral bands (High) + 16 dynamic bands + limiter: %.2f %% of one core\n", pct);
+        check (pct < 20.0, "spectral worst case CPU (% of one core)", pct, 20);
+        // automate the spectral bands' frequency and density every block
+        float mx = 0; bool fin = true;
+        AudioBuffer<float> buf (2, 512);
+        for (int k = 0; k < 400; ++k)
+        {
+            const double ph = k * 512.0 / 48000.0;
+            for (int b = 0; b < arc::kNumBands; b += 3)
+            {
+                setParamFast (*ps, params::bandId (b, "freq"), (float) (100.0 * std::pow (100.0, 0.5 + 0.5 * std::sin (ph * 5.0 + b))));
+                setParamFast (*ps, params::bandId (b, "specDens"), (float) (50.0 + 50.0 * std::sin (ph * 3.0 + b)));
+            }
+            for (int i = 0; i < 512; ++i) { auto v = pinkish (i); buf.setSample (0, i, v.first); buf.setSample (1, i, v.second); }
+            ps->processBlock (buf, mm);
+            for (int ch = 0; ch < 2; ++ch) for (int i = 0; i < 512; ++i) { const float x = buf.getSample (ch, i); fin = fin && std::isfinite (x); mx = jmax (mx, std::abs (x)); }
+        }
+        check (fin && mx <= 1.0f, "spectral automation: stable output", mx, 1);
+    }
+
     std::puts ("-- state --");
     MemoryBlock state;
     p->getStateInformation (state);
@@ -550,6 +626,37 @@ int main (int argc, char** argv)
             const auto gb = p->bandSettings (grabbed);
             check (std::abs (12.0 * std::log2 (gb.freq / 440.0)) < 1.0, "grabbed band sits on the 440 Hz tone (" + theme::noteName (gb.freq) + ")", gb.freq, 440);
             check (gb.gainDb > 2.0, "dragging up boosted it", gb.gainDb, 6);
+        }
+        {   // Alt+Shift+click makes a spectral band; screenshot it working on a ringing signal
+            for (int b = 0; b < arc::kNumBands; ++b) p->setParam (params::bandId (b, "used"), 0.0f);
+            auto evm = [&] (Point<float> pt, ModifierKeys mods)
+            {
+                return MouseEvent (src, pt, mods, 1.0f, 0, 0, 0, 0, disp, disp, Time::getCurrentTime(), pt, Time::getCurrentTime(), 1, false);
+            };
+            // log axis: 20 Hz .. 20 kHz over the plot width, same as the display
+            const auto pa = disp->getLocalBounds().toFloat().reduced (8.0f, 6.0f).withTrimmedRight (26.0f).withTrimmedBottom (14.0f);
+            const float x3k = pa.getX() + pa.getWidth() * (float) (std::log (3000.0 / 20.0) / std::log (20000.0 / 20.0));
+            const Point<float> at (x3k, pa.getCentreY());
+            disp->mouseDown (evm (at, ModifierKeys (ModifierKeys::leftButtonModifier | ModifierKeys::altModifier | ModifierKeys::shiftModifier)));
+            disp->mouseUp (evm (at, ModifierKeys()));
+            int sb = -1; for (int b = 0; b < arc::kNumBands; ++b) if (p->bandSettings (b).used) sb = b;
+            check (sb >= 0 && p->bandSettings (sb).isSpectral() && std::abs (std::log2 (p->bandSettings (sb).freq / 3000.0)) < 0.1,
+                   "Alt+Shift+click creates a spectral band where you click", sb >= 0 ? p->bandSettings (sb).freq : 0, 3000);
+            if (sb >= 0)
+            {
+                p->setParam (params::bandId (sb, "q"), 0.6f);
+                p->setParam (params::bandId (sb, "range"), -9.0f);
+                long rn = 0; Random rr2 (3);
+                auto ringing = [&] (int) { const long n = rn++; const float v = 0.06f * (rr2.nextFloat() * 2 - 1) + (float) (0.08 * std::sin (2 * MathConstants<double>::pi * 3400.0 * (double) n / 48000))
+                                                                  + (float) (0.05 * std::sin (2 * MathConstants<double>::pi * 5200.0 * (double) n / 48000)); return std::make_pair (v, v); };
+                for (int i = 0; i < 60; ++i) { run (*p, 0.05, ringing); pump (30); }
+                disp->setSelected (sb);
+                pump (200);
+                auto im = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+                File sf = File (shotPath).getSiblingFile ("spectral.png");
+                sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so);
+                check (sf.existsAsFile(), "spectral band screenshot", 1, 1);
+            }
         }
         p->editorBeingDeleted (ed.get());
     }

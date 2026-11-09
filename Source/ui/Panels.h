@@ -56,9 +56,13 @@ private:
     Knob freq { "FREQUENCY" }, gain { "GAIN" }, q { "Q" }, thr { "THRESHOLD" }, range { "RANGE" };
     juce::ToggleButton dyn { "Dynamic" }, bypass { "Bypass" }, sc { "Sidechain" };
     juce::TextButton del { "Delete" };
-    std::unique_ptr<APVTS::ComboBoxAttachment> aType, aSlope, aPlace;
-    std::unique_ptr<APVTS::SliderAttachment> aFreq, aGain, aQ, aThr, aRange;
-    std::unique_ptr<APVTS::ButtonAttachment> aDyn, aBypass, aSc;
+    // spectral dynamics
+    juce::ToggleButton spec { "Spectral" }, specAuto { "Auto" }, specTilt { "Tilt" };
+    juce::ComboBox specRes;
+    Knob atk { "ATTACK" }, rel { "RELEASE" }, dens { "DENSITY" };
+    std::unique_ptr<APVTS::ComboBoxAttachment> aType, aSlope, aPlace, aSpecRes;
+    std::unique_ptr<APVTS::SliderAttachment> aFreq, aGain, aQ, aThr, aRange, aAtk, aRel, aDens;
+    std::unique_ptr<APVTS::ButtonAttachment> aDyn, aBypass, aSc, aSpec, aSpecAuto, aSpecTilt;
 };
 
 class LoudnessPanel : public juce::Component, private juce::Timer

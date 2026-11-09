@@ -120,6 +120,28 @@ void EqDisplay::timerCallback()
         if (src != nullptr) updateWaterfall (*src);
     }
     for (int b = 0; b < arc::kNumBands; ++b) bands[(size_t) b] = proc.bandSettings (b);
+    {   // spectral dynamics: what the spectral bands are doing right now, per display column
+        const auto a = plotArea();
+        const int cols = (int) (a.getWidth() / 3) + 2;
+        if ((int) specCol.size() != cols) specCol.assign ((size_t) cols, 0.0f);
+        const bool on = proc.spectralActive();
+        const auto& sd = proc.spectralDynamics();
+        const double bh = sd.binHz();
+        const int nb = sd.numBins();
+        for (int i = 0; i < cols; ++i)
+        {
+            float v = 0.0f;
+            if (on)
+            {
+                const double k = freqForX (a.getX() + (float) i * 3) / bh;
+                const int k0 = jlimit (0, nb - 2, (int) k);
+                const float t = (float) jlimit (0.0, 1.0, k - k0);
+                v = sd.shownGainDb (k0) * (1 - t) + sd.shownGainDb (k0 + 1) * t;
+            }
+            auto& c = specCol[(size_t) i];
+            c += (v - c) * (std::abs (v) > std::abs (c) ? 0.7f : 0.2f);   // quick to show, calm to fall back
+        }
+    }
     if (mouseInside && dragging < 0 && hovered < 0) findPeakNear (mousePos);
     repaint();
 }
@@ -409,6 +431,24 @@ void EqDisplay::paint (Graphics& g)
         g.strokePath (p, PathStrokeType (7.0f, PathStrokeType::curved, PathStrokeType::rounded));
         g.setColour (Colours::white.withAlpha (0.95f));
         g.strokePath (p, PathStrokeType (2.0f, PathStrokeType::curved, PathStrokeType::rounded));
+
+        // spectral dynamics: the per-frequency gain change riding on top of the curve
+        if ((int) specCol.size() == cols && std::any_of (specCol.begin(), specCol.end(), [] (float v) { return std::abs (v) > 0.05f; }))
+        {
+            Path live, area;
+            for (int i = 0; i < cols; ++i)
+            {
+                const float x = a.getX() + (float) i * 3;
+                const float y = jlimit (a.getY() - 2, a.getBottom() + 2, yForGain (total[(size_t) i] + specCol[(size_t) i]));
+                if (i == 0) { live.startNewSubPath (x, y); area.startNewSubPath (x, y); } else { live.lineTo (x, y); area.lineTo (x, y); }
+            }
+            for (int i = cols - 1; i >= 0; --i)
+                area.lineTo (a.getX() + (float) i * 3, jlimit (a.getY() - 2, a.getBottom() + 2, yForGain (total[(size_t) i])));
+            area.closeSubPath();
+            const auto sc = theme::specCol;
+            g.setColour (sc.withAlpha (0.35f)); g.fillPath (area);
+            g.setColour (sc.withAlpha (0.95f)); g.strokePath (live, PathStrokeType (1.4f, PathStrokeType::curved));
+        }
     }
 
     // nodes
@@ -419,7 +459,7 @@ void EqDisplay::paint (Graphics& g)
         const auto pos = nodePosition (s);
         const auto c = theme::bandColour (b);
         const float r = (b == selected || b == hovered) ? 8.5f : 7.0f;
-        if (s.dynamic && arc::typeSupportsDynamic (s.type) && ! linear)
+        if (s.dynamic && arc::typeSupportsDynamic (s.type) && (! linear || s.isSpectral()))
         {   // line + ring show where the dynamic range can take the band
             g.setColour (c.withAlpha (0.35f));
             const float yr = yForGain (s.gainDb * scale + s.rangeDb);
@@ -494,7 +534,9 @@ void EqDisplay::paint (Graphics& g)
         g.setColour (theme::text); g.drawText (message, box, Justification::centred);
     }
     String status;
-    if (linear) status << "Linear phase  (latency " << String (1000.0 * proc.getLatencySamples() / jmax (1.0, fs), 0) << " ms, dynamic bands act static)    ";
+    if (linear) status << "Linear phase  (latency " << roundToInt (1000.0 * proc.getLatencySamples() / jmax (1.0, fs)) << " ms, dynamic bands act static)    ";
+    if (proc.spectralActive())
+        status << "Spectral  (latency " << roundToInt (1000.0 * proc.spectralDynamics().latency() / jmax (1.0, fs)) << " ms)    ";
     if (setting (ana::freeze, 0) != 0) status << "ANALYZER FROZEN";
     if (status.isNotEmpty())
     {
@@ -623,6 +665,7 @@ int EqDisplay::addBand (arc::BandType t, double f, double gainDb, double q)
     proc.setParam (params::bandId (b, "slope"), t == arc::BandType::Bell ? 1.0f : 3.0f);
     proc.setParam (params::bandId (b, "place"), 0.0f);
     proc.setParam (params::bandId (b, "dyn"), 0.0f);
+    proc.setParam (params::bandId (b, "spec"), 0.0f);
     proc.setParam (params::bandId (b, "bypass"), 0.0f);
     proc.setParam (params::bandId (b, "used"), 1.0f);
     bands[(size_t) b] = proc.bandSettings (b);
@@ -650,6 +693,7 @@ void EqDisplay::showBandMenu (int b)
     m.addSubMenu ("Slope", slopes, arc::typeHasSlope (s.type));
     m.addSubMenu ("Stereo", places);
     m.addItem (1, "Dynamic EQ", arc::typeSupportsDynamic (s.type), s.dynamic);
+    m.addItem (5, s.isSpectral() ? "Make normal dynamic (not spectral)" : "Make spectral", arc::typeSupportsDynamic (s.type), s.isSpectral());
     m.addItem (2, "Bypass", true, s.bypass);
     m.addItem (4, "Snap to nearest note (" + theme::noteName (440.0 * std::pow (2.0, std::round (12.0 * std::log2 (s.freq / 440.0)) / 12.0)) + ")");
     m.addSeparator();
@@ -663,6 +707,16 @@ void EqDisplay::showBandMenu (int b)
         else if (r >= 200 && r < 300) pr.setParam (params::bandId (b, "slope"), (float) (r - 200));
         else if (r >= 300 && r < 400) pr.setParam (params::bandId (b, "place"), (float) (r - 300));
         else if (r == 1) pr.setParam (params::bandId (b, "dyn"), s.dynamic ? 0.0f : 1.0f);
+        else if (r == 5)
+        {
+            const bool on = ! s.isSpectral();
+            pr.setParam (params::bandId (b, "spec"), on ? 1.0f : 0.0f);
+            if (on)
+            {
+                pr.setParam (params::bandId (b, "dyn"), 1.0f);
+                if (std::abs (s.rangeDb) < 0.5) pr.setParam (params::bandId (b, "range"), -6.0f);
+            }
+        }
         else if (r == 2) pr.setParam (params::bandId (b, "bypass"), s.bypass ? 0.0f : 1.0f);
         else if (r == 3) safe->deleteBand (b);
         else if (r == 4) pr.setParam (params::bandId (b, "freq"), (float) (440.0 * std::pow (2.0, std::round (12.0 * std::log2 (s.freq / 440.0)) / 12.0)));
@@ -683,6 +737,22 @@ void EqDisplay::mouseExit (const MouseEvent&) { hovered = -1; mouseInside = fals
 void EqDisplay::mouseDown (const MouseEvent& e)
 {
     int h = hitNode (e.position);
+    if (h < 0 && e.mods.isLeftButtonDown() && e.mods.isAltDown() && e.mods.isShiftDown() && plotArea().contains (e.position))
+    {   // Alt+Shift+click: new spectral band (tames whatever pokes out around here)
+        const double f = jlimit (30.0, 16000.0, freqForX (e.position.x));
+        const int b = addBand (arc::BandType::Bell, f, 0.0, 1.0);
+        if (b >= 0)
+        {
+            proc.setParam (params::bandId (b, "dyn"), 1.0f);
+            proc.setParam (params::bandId (b, "spec"), 1.0f);
+            proc.setParam (params::bandId (b, "specAuto"), 1.0f);
+            proc.setParam (params::bandId (b, "specTilt"), 1.0f);
+            proc.setParam (params::bandId (b, "range"), -6.0f);
+            bands[(size_t) b] = proc.bandSettings (b);
+            showMessage ("Spectral band: only the frequencies that stick out get turned down");
+        }
+        return;
+    }
     if (h < 0 && ! hoverPeak.valid && e.mods.isLeftButtonDown() && e.getNumberOfClicks() == 1) setSelected (-1);   // click empty space: close the band panel
     if (h < 0 && hoverPeak.valid && e.mods.isLeftButtonDown() && ! e.mods.isAltDown())
     {   // spectrum grab: new narrow bell on the peak, drag up/down to set its gain

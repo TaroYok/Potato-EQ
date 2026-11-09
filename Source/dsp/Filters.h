@@ -57,8 +57,12 @@ struct BandSettings
     bool dynamic = false;
     double thresholdDb = -24.0, rangeDb = -6.0;
     bool sidechain = false;   // dynamic detection listens to the external sidechain input
+    // spectral dynamics: the dynamic part acts only on the frequencies inside the band that exceed the threshold
+    bool spectral = false, specAuto = true, specTilt = true;
+    double specAttackMs = 10.0, specReleaseMs = 120.0, specDensity = 0.5;
 
     bool active() const { return used && ! bypass; }
+    bool isSpectral() const { return active() && dynamic && spectral && typeSupportsDynamic (type); }
 };
 
 struct Section

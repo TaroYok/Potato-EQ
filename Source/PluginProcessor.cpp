@@ -33,6 +33,7 @@ PotatoEQProcessor::PotatoEQProcessor()
     pTilt = apvts.getRawParameterValue (params::id::autoTilt);
     pBass = apvts.getRawParameterValue (params::id::autoBass);
     pSmooth = apvts.getRawParameterValue (params::id::autoSmooth);
+    pSpecRes = apvts.getRawParameterValue (params::id::specRes);
     meter.prepare (48000.0);
     startThread (Thread::Priority::low);
 }
@@ -59,6 +60,9 @@ void PotatoEQProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     preMeter.prepare (sampleRate);
     inMeter.prepare (sampleRate);
     limiter.prepare (sampleRate);
+    spectral.prepare (sampleRate);
+    spectral.setResolution ((int) pSpecRes->load(), true);
+    specActive = false;
     outSmooth.reset (sampleRate, 0.05);
     outSmooth.setCurrentAndTargetValue (Decibels::decibelsToGain (pOut->load()));
     monoScratch.assign ((size_t) samplesPerBlock + 16, 0.0f);
@@ -101,7 +105,7 @@ std::array<arc::BandSettings, arc::kNumBands> PotatoEQProcessor::readAllBands() 
 
 void PotatoEQProcessor::updateLatency()
 {
-    setLatencySamples ((lastMode == 1 ? firSize : 0) + limiter.latency());
+    setLatencySamples ((lastMode == 1 ? firSize : 0) + limiter.latency() + (specActive.load() ? spectral.latency() : 0));
 }
 
 float PotatoEQProcessor::targetLufs() const
@@ -192,6 +196,25 @@ void PotatoEQProcessor::processBlock (AudioBuffer<float>& fullBuffer, MidiBuffer
             for (int i = 0; i < n; ++i) { const float m = l[i], s = r[i]; l[i] = m + s; r[i] = m - s; }
         }
         else convMS.process (dsp::ProcessContextReplacing<float> (block));   // keeps latency identical in mono
+    }
+
+    // spectral dynamics: per-frequency dynamic bands (adds latency only while a band is spectral)
+    {
+        const auto all = readAllBands();
+        const bool want = std::any_of (all.begin(), all.end(), [] (const arc::BandSettings& b) { return b.isSpectral(); });
+        const int res = jlimit (0, 2, (int) pSpecRes->load());
+        if (want != specActive.load() || (want && res != spectral.resolution()))
+        {
+            spectral.setResolution (res);
+            spectral.reset();
+            specActive = want;
+            updateLatency();
+        }
+        if (want)
+        {
+            spectral.setBands (all);
+            spectral.process (buffer.getArrayOfWritePointers(), numCh, n, scCh > 0 ? scPtr : nullptr, scCh);
+        }
     }
 
     if (meterResetRequest.load()) preMeter.reset();
@@ -639,7 +662,10 @@ void PotatoEQProcessor::applyPreset (int index)
             setParam (params::bandId (b, "q"), (float) d.q);
             setParam (params::bandId (b, "slope"), (float) params::slopeIndex (d.slope));
             setParam (params::bandId (b, "place"), (float) d.place);
-            setParam (params::bandId (b, "dyn"), d.dynamic ? 1.0f : 0.0f);
+            setParam (params::bandId (b, "dyn"), d.dynamic || d.spectral ? 1.0f : 0.0f);
+            setParam (params::bandId (b, "spec"), d.spectral ? 1.0f : 0.0f);
+            setParam (params::bandId (b, "specAuto"), 1.0f);
+            setParam (params::bandId (b, "specTilt"), 1.0f);
             setParam (params::bandId (b, "thr"), (float) d.thr);
             setParam (params::bandId (b, "range"), (float) d.range);
             setParam (params::bandId (b, "bypass"), 0.0f);
@@ -650,6 +676,7 @@ void PotatoEQProcessor::applyPreset (int index)
             setParam (params::bandId (b, "used"), 0.0f);
             setParam (params::bandId (b, "gain"), 0.0f);
             setParam (params::bandId (b, "dyn"), 0.0f);
+            setParam (params::bandId (b, "spec"), 0.0f);
             setParam (params::bandId (b, "bypass"), 0.0f);
         }
     }

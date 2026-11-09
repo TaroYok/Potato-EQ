@@ -78,6 +78,7 @@ private:
     void updateWaterfall (const Spectrum&);
     void drawStyledSpectrum (juce::Graphics&, const Spectrum&, const theme::Palette&, int style);
     Spectrum pre, post, side;
+    std::vector<float> specCol;   // live spectral-dynamics gain change per display column (dB)
     std::array<arc::BandSettings, arc::kNumBands> bands;
 
     // per-band response curves are cached and only recomputed when a band changes

@@ -15,6 +15,7 @@ struct Band
     BandType type; double freq, gain, q; int slope = 12;
     Placement place = Placement::Stereo;
     bool dynamic = false; double thr = -30, range = -6;
+    bool spectral = false;   // dynamic part works per frequency (auto threshold)
 };
 
 struct Preset
@@ -66,11 +67,15 @@ inline const std::vector<Preset>& all()
           { { T::LowCut, 100, 0, 0.7, 18 }, { T::Bell, 350, -4, 1.4 }, { T::Bell, 800, -1.5, 2.0 } } },
         { "Vocals", "Vocal: De-ess", "Dynamic cut that only acts on loud S and T sounds.",
           { { T::LowCut, 80, 0, 0.7, 12 }, { T::Bell, 7000, 0, 2.5, 12, Placement::Stereo, true, -35, -8 } } },
+        { "Vocals", "Vocal: Tame Harshness (spectral)", "Spectral band: only the harsh frequencies that poke out get pulled down.",
+          { { T::LowCut, 80, 0, 0.7, 12 }, { T::Bell, 4500, 0, 0.6, 12, Placement::Stereo, true, -30, -6, true } }, 1 },
         { "Vocals", "Backing Vocals: Tuck", "Thin and airy so they sit behind the lead.",
           { { T::LowCut, 180, 0, 0.7, 18 }, { T::Bell, 2500, -2, 1.0 }, { T::HighShelf, 9000, 2, 0.7 } } },
 
         { "Instruments", "Acoustic Guitar", "Less boom, more sparkle.",
           { { T::LowCut, 80, 0, 0.7, 18 }, { T::Bell, 200, -3, 1.2 }, { T::Bell, 5000, 2, 1.0 }, { T::HighShelf, 12000, 1.5, 0.7 } } },
+        { "Instruments", "Guitar: Tame Resonances (spectral)", "Spectral band across the body and pick range: rings and harsh notes get smoothed.",
+          { { T::LowCut, 70, 0, 0.7, 12 }, { T::Bell, 1800, 0, 0.4, 12, Placement::Stereo, true, -30, -6, true } }, 1 },
         { "Instruments", "Piano: Bright", "Clear and present in a mix.",
           { { T::LowCut, 40, 0, 0.7, 12 }, { T::Bell, 300, -2, 1.0 }, { T::Bell, 3500, 2, 0.9 } } },
         { "Instruments", "Synth Pad: Make Room", "Scoops the pad out of the vocal range.",
@@ -80,6 +85,8 @@ inline const std::vector<Preset>& all()
           { { T::LowCut, 25, 0, 0.7, 18 }, { T::LowShelf, 80, 1, 0.7 }, { T::Bell, 300, -1, 0.9 }, { T::HighShelf, 12000, 1.5, 0.7 } } },
         { "Mix / Master", "Master: Air", "Just adds shimmer on top.",
           { { T::HighShelf, 12000, 2.5, 0.7 } } },
+        { "Mix / Master", "Master: Smooth Harsh Highs (spectral)", "Spectral high shelf: calms piercing top-end moments, leaves the rest of the air alone.",
+          { { T::HighShelf, 4000, 0, 0.7, 12, Placement::Stereo, true, -30, -4, true } }, 0 },
         { "Mix / Master", "Mono Bass (M/S)", "Removes stereo below 120 Hz so the low end hits in mono.",
           { { T::LowCut, 120, 0, 0.7, 24, Placement::Side } } },
         { "Mix / Master", "Wider Top (M/S)", "Lifts the highs on the sides only.",
