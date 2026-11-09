@@ -30,7 +30,7 @@ jobs:
             cmake_args: -DPOTATO_BUILD_HARNESS=ON -G Ninja
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Linux packages
         if: runner.os == 'Linux'
@@ -121,7 +121,7 @@ jobs:
     permissions:
       contents: write   # only the release job may publish
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: CMakeLists.txt
       - name: Release name
