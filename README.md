@@ -120,5 +120,11 @@ tests/DspTests.cpp        filter, engine, EBU loudness and auto-EQ tests
 tests/PluginHarness.cpp   end-to-end plugin check + editor screenshot
 ```
 
-Plugin made with [JUCE](https://juce.com). JUCE is dual-licensed (AGPLv3 or commercial).
-If you plan to sell this plugin closed-source, you need a JUCE commercial licence (free tier available for small revenue).
+## Licence
+
+Potato EQ is free software under the **GNU Affero General Public License v3.0** (see [LICENSE](LICENSE)).
+You can use, study, change and share it, including commercially, as long as anything you distribute
+that's based on it is shared under the same licence, with its source code.
+
+Made with [JUCE](https://juce.com), used here under its AGPLv3 option. The bundled fonts
+(`Resources/Fonts`) keep their own SIL Open Font License; their licence texts sit beside them.
