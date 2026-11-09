@@ -354,7 +354,7 @@ int main (int argc, char** argv)
         auto ps = std::make_unique<PotatoEQProcessor>();
         ps->setPlayConfigDetails (2, 2, 48000, 512);
         ps->prepareToPlay (48000, 512);
-        AudioBuffer<float> one (2, 512); MidiBuffer mm;
+        AudioBuffer<float> one (2, 512); one.clear(); MidiBuffer mm;
         ps->processBlock (one, mm);
         const int base = ps->getLatencySamples();
         ps->setParam (params::bandId (0, "type"), (float) arc::BandType::Bell);
@@ -383,6 +383,17 @@ int main (int argc, char** argv)
         MemoryBlock mb; ps->getStateInformation (mb);
         auto pr = std::make_unique<PotatoEQProcessor>(); pr->setStateInformation (mb.getData(), (int) mb.getSize());
         check (pr->bandSettings (0).isSpectral() && (int) pr->apvts.getRawParameterValue (params::id::specRes)->load() == 2, "spectral settings come back with the project", 1, 1);
+        {   // a broken (NaN / infinite) block from the host must not break the sound afterwards
+            AudioBuffer<float> bad (2, 512); bad.clear();
+            bad.setSample (0, 100, std::numeric_limits<float>::quiet_NaN()); bad.setSample (1, 200, std::numeric_limits<float>::infinity());
+            ps->processBlock (bad, mm);
+            std::vector<float> after;
+            run (*ps, 1.0, ring, &after);
+            const bool ok = std::all_of (after.begin(), after.end(), [] (float v) { return std::isfinite (v); })
+                         && std::any_of (after.begin(), after.end(), [] (float v) { return std::abs (v) > 0.01f; });
+            check (ok, "a NaN / infinite input sample doesn't break the plugin", ok, 1);
+        }
+        one.clear();
         ps->setParam (params::bandId (0, "spec"), 0.0f);
         ps->processBlock (one, mm);
         check (ps->getLatencySamples() == base, "latency drops back when no band is spectral", ps->getLatencySamples() - base, 0);

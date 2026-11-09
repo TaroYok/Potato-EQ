@@ -181,6 +181,43 @@ void EqDisplay::updateCollisions()
         if (sn.id == proc.shareId()) me = sn;
         else if (names.contains (sn.name)) compared.push_back (sn);
     }
+    {   // smooth the compared spectra like the analyzer: over frequency (power average, at least 1/3 octave wide)
+        // and over time (quick rise, gentle fall), so the overlay glides instead of jumping between updates
+        static const double widthOct[] = { 1.0 / 48.0, 1.0 / 24.0, 1.0 / 12.0, 1.0 / 6.0, 1.0 / 3.0 };
+        const double w = jmax (1.0 / 3.0, widthOct[jlimit (0, 4, setting (ana::smoothing, 2))] * 2.0);
+        const int half = jmax (1, (int) std::round (w * 12.0 / 2.0));   // bands each side (12 bands per octave)
+        static const float release[] = { 0.05f, 0.1f, 0.2f }, attack[] = { 0.25f, 0.35f, 0.5f };
+        const int sp = jlimit (0, 2, setting (ana::speed, 1));
+        std::map<int, arc::collide::Spectrum> next;
+        for (auto& o : compared)
+        {
+            arc::collide::Spectrum sm {};
+            for (int i = 0; i < arc::collide::kBands; ++i)
+            {
+                double p = 0, wsum = 0;
+                for (int j = jmax (0, i - half); j <= jmin (arc::collide::kBands - 1, i + half); ++j)
+                {
+                    const double wt = 1.0 - std::abs (j - i) / (half + 1.0);   // triangular window
+                    p += wt * std::pow (10.0, o.db[(size_t) j] / 10.0); wsum += wt;
+                }
+                sm[(size_t) i] = (float) (10.0 * std::log10 (p / wsum + 1e-30));
+            }
+            auto it = otherShown.find (o.id);
+            if (it == otherShown.end()) next[o.id] = sm;
+            else
+            {
+                auto cur = it->second;
+                for (int i = 0; i < arc::collide::kBands; ++i)
+                {
+                    auto& c = cur[(size_t) i];
+                    const float v = o.live() ? sm[(size_t) i] : -150.0f;
+                    c += (v - c) * (v > c ? attack[sp] : release[sp]);
+                }
+                next[o.id] = cur;
+            }
+        }
+        otherShown.swap (next);
+    }
     String label = "Compare";
     if (! compared.empty()) label = "vs " + compared.front().name + (compared.size() > 1 ? " +" + String ((int) compared.size() - 1) : String());
     if (compareBtn.getButtonText() != label) compareBtn.setButtonText (label);
@@ -550,33 +587,57 @@ void EqDisplay::paint (Graphics& g)
         const double tilt = ana::tiltValues[jlimit (0, 3, setting (ana::tilt, 2))];
         // shared levels are energy per band; the analyzer shows energy density, so take out the band width (3 dB/oct)
         auto yOf = [&] (int i, float db) { const double f = cl::bandFreq (i); return yForSpectrum (db - 10.0 * std::log10 (f / 1000.0) + tilt * std::log2 (f / 1000.0) + otherOffset); };
-        if (me && setting (ana::collide, 1) != 0)
-            for (int i = 0; i < cl::kBands; ++i)
+        if (me && setting (ana::collide, 1) != 0 && std::any_of (collShown.begin(), collShown.end(), [] (float v) { return v >= 0.05f; }))
+        {   // red where the tracks clash: per pixel column, with smoothly varying strength; the top follows the
+            // lower of the two (smoothed) spectra
+            for (float x = a.getX(); x < a.getRight(); x += (float) kColStep)
             {
-                const float k = collShown[(size_t) i];
+                const double fi = std::log (freqForX (x + kColStep * 0.5f) / 20.0) / std::log (1000.0) * (cl::kBands - 1);
+                const int i0 = jlimit (0, cl::kBands - 1, (int) std::floor (fi)), i1 = jmin (cl::kBands - 1, i0 + 1);
+                const float t = (float) jlimit (0.0, 1.0, fi - i0);
+                const float k = collShown[(size_t) i0] * (1 - t) + collShown[(size_t) i1] * t;
                 if (k < 0.05f) continue;
-                const float x0 = xForFreq (cl::bandLo (i)), x1 = xForFreq (cl::bandHi (i));
-                const int w = collWho[(size_t) i];
-                const float other = (w >= 0 && w < (int) compared.size()) ? compared[(size_t) w].db[(size_t) i] : me->db[(size_t) i];
-                const float y = jlimit (a.getY(), a.getBottom(), yOf (i, jmin (me->db[(size_t) i], other)));
-                g.setColour (theme::bad.withAlpha (0.10f + 0.32f * k));
-                g.fillRect (Rectangle<float> (x0, y, x1 - x0 + 0.5f, a.getBottom() - y));
-                g.setColour (theme::bad.withAlpha (0.35f + 0.6f * k));
-                g.fillRect (Rectangle<float> (x0, a.getBottom() - 5.0f, x1 - x0 + 0.5f, 5.0f));
+                const int w = collWho[(size_t) (t < 0.5f ? i0 : i1)];
+                float yOther = a.getBottom();
+                if (w >= 0 && w < (int) compared.size())
+                {
+                    const auto it = otherShown.find (compared[(size_t) w].id);
+                    const auto& odb = it != otherShown.end() ? it->second : compared[(size_t) w].db;
+                    yOther = yOf (i0, odb[(size_t) i0]) * (1 - t) + yOf (i1, odb[(size_t) i1]) * t;
+                }
+                const int col = (int) ((x - a.getX()) / kColStep);
+                const float yOwn = (col >= 0 && col < (int) post.display.size()) ? yForSpectrum (post.display[(size_t) col]) : yOther;
+                const float y = jlimit (a.getY(), a.getBottom(), jmax (yOther, yOwn));
+                g.setColour (theme::bad.withAlpha (0.08f + 0.34f * k));
+                g.fillRect (Rectangle<float> (x, y, (float) kColStep, a.getBottom() - y));
+                g.setColour (theme::bad.withAlpha (0.3f + 0.65f * k));
+                g.fillRect (Rectangle<float> (x, a.getBottom() - 5.0f, (float) kColStep, 5.0f));
             }
+        }
         float ly = (float) compareBtn.getBottom() + 4.0f;
         for (auto& o : compared)
         {
-            Path p; bool started = false;
-            for (int i = 0; i < cl::kBands; ++i)
+            const auto it = otherShown.find (o.id);
+            const auto& db = it != otherShown.end() ? it->second : o.db;
+            // draw at the analyzer's column spacing, interpolating smoothly (cubic) between the 1/12-octave bands
+            auto at = [&] (double fi)
             {
-                const double f = cl::bandFreq (i);
-                if (f < kLoHz || f > kHiHz) continue;
-                const float x = xForFreq (f), y = jlimit (a.getY(), a.getBottom(), yOf (i, o.db[(size_t) i]));
+                const int i1 = jlimit (0, cl::kBands - 1, (int) std::floor (fi));
+                const int i0 = jmax (0, i1 - 1), i2 = jmin (cl::kBands - 1, i1 + 1), i3 = jmin (cl::kBands - 1, i1 + 2);
+                const float t = (float) jlimit (0.0, 1.0, fi - i1);
+                const float y0 = yOf (i0, db[(size_t) i0]), y1 = yOf (i1, db[(size_t) i1]), y2 = yOf (i2, db[(size_t) i2]), y3 = yOf (i3, db[(size_t) i3]);
+                // Catmull-Rom spline
+                return 0.5f * ((2 * y1) + (-y0 + y2) * t + (2 * y0 - 5 * y1 + 4 * y2 - y3) * t * t + (-y0 + 3 * y1 - 3 * y2 + y3) * t * t * t);
+            };
+            Path p; bool started = false;
+            for (float x = a.getX(); x <= a.getRight(); x += (float) kColStep)
+            {
+                const double fi = std::log (freqForX (x) / 20.0) / std::log (1000.0) * (cl::kBands - 1);
+                const float y = jlimit (a.getY(), a.getBottom(), at (fi));
                 if (! started) { p.startNewSubPath (x, y); started = true; } else p.lineTo (x, y);
             }
             g.setColour (o.colour.withAlpha (o.live() ? 0.85f : 0.3f));
-            g.strokePath (p, PathStrokeType (1.3f, PathStrokeType::curved));
+            g.strokePath (p, PathStrokeType (1.4f, PathStrokeType::curved, PathStrokeType::rounded));
             const String t = o.name + (o.live() ? String() : String ("  (not playing)"));
             g.setFont (theme::font (11.0f));
             const auto row = Rectangle<float> ((float) compareBtn.getX(), ly, (float) compareBtn.getWidth(), 14.0f);

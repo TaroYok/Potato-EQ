@@ -1,6 +1,7 @@
 #pragma once
 #include "../PluginProcessor.h"
 #include "Theme.h"
+#include <map>
 
 // The main curve display: spectrum analyzer, band curves, draggable band nodes,
 // spectrum grab (drag a peak in the analyzer to create a band) and note readouts.
@@ -94,6 +95,7 @@ private:
     std::array<int, arc::collide::kBands> collWho {};   // index into `compared` of the strongest clash per band
     struct CollRegion { arc::collide::Region region; juce::String with; juce::Colour colour; };
     std::vector<CollRegion> collRegions;
+    std::map<int, arc::collide::Spectrum> otherShown;   // smoothed (frequency + time) spectra of compared tracks, by id
     float otherOffset = 0.0f;                // aligns shared spectra with this analyzer's scale
     void updateCollisions();
     int regionAt (float x) const;

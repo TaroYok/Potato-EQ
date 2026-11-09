@@ -181,6 +181,19 @@ void PotatoEQProcessor::processBlock (AudioBuffer<float>& fullBuffer, MidiBuffer
 
     if ((int) monoScratch.size() < n) monoScratch.resize ((size_t) n);   // only if the host lied about block size
 
+    // Safety: a single NaN / infinity from the host or an upstream plugin would get stuck in the filter states and
+    // break the sound until the plugin is reloaded. Replace any such sample with silence (also on the sidechain).
+    auto sanitise = [n] (float* x)
+    {
+        for (int i = 0; i < n; ++i) if (! std::isfinite (x[i])) x[i] = 0.0f;
+    };
+    for (int c = 0; c < numCh; ++c) sanitise (buffer.getWritePointer (c));
+    if (getBusCount (true) > 1 && getBus (true, 1)->isEnabled())
+    {
+        auto scb = getBusBuffer (fullBuffer, true, 1);
+        for (int c = 0; c < jmin (2, scb.getNumChannels()); ++c) sanitise (scb.getWritePointer (c));
+    }
+
     // optional sidechain input
     const float* scPtr[2] = { nullptr, nullptr };
     int scCh = 0;
