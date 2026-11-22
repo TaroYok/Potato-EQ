@@ -807,13 +807,6 @@ void EqDisplay::paint (Graphics& g)
         g.drawText (t, a.reduced (6, 4).removeFromBottom (14), Justification::bottomRight);
     }
 
-    if (std::none_of (bands.begin(), bands.end(), [] (auto& s) { return s.used; }))
-    {
-        g.setColour (theme::textDim);
-        g.setFont (theme::font (14.0f));
-        g.drawText ("Double-click to add a band, or drag a peak in the analyzer.  Scroll = Q, right-click = options, Alt-click = delete.",
-                    a.withTrimmedTop (a.getHeight() * 0.62f).withHeight (24), Justification::centred);
-    }
     if (message.isNotEmpty() && Time::getMillisecondCounter() < messageUntil)
     {
         g.setFont (theme::font (13.0f));

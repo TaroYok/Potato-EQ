@@ -21,9 +21,11 @@ inline Colour accent2   { 0xff4cd964 };   // iOS green
 inline const Colour potato    { 0xfff2c14e };   // logo gold
 inline const Colour autoCol   { 0xffffa94d };
 inline const Colour specCol   { 0xff4ff0d8 };   // spectral dynamics (aqua)
-inline const Colour good      { 0xff7cf29a };
-inline const Colour warn      { 0xffffd166 };
-inline const Colour bad       { 0xffff6b6b };
+// Status colours avoid the red/green pair: on-target = sky blue, warning = yellow, over/clash = bright vermillion.
+// These stay apart for deuteranopia, protanopia and tritanopia (Okabe-Ito based, lifted for dark backgrounds).
+inline const Colour good      { 0xff6cc8ff };
+inline const Colour warn      { 0xfff5e24a };
+inline const Colour bad       { 0xffff6a2a };
 inline Colour chrome    { 0xffd5dae1 };   // brushed silver
 inline Colour navTop    { 0xff9aaecb };   // iPhone OS navigation bar
 inline Colour navBottom { 0xff4d6487 };
@@ -35,8 +37,10 @@ constexpr float radius = 12.0f;
 
 inline Colour bandColour (int band)
 {
-    static const juce::uint32 c[] = { 0xffff7b7b, 0xffffb35c, 0xffffe066, 0xffa6e86b, 0xff4ce0b3, 0xff4fd2ef,
-                                      0xff63b3ff, 0xff8c9dff, 0xffb48cff, 0xffe58cf2, 0xffff8fbd, 0xffdfe7ee };
+    // Colourblind-friendly: Okabe-Ito hues brightened for dark backgrounds, ordered so neighbouring
+    // bands alternate warm/cool and light/dark. Each node also shows its band number.
+    static const juce::uint32 c[] = { 0xffffb000, 0xff56b4e9, 0xfff0e442, 0xff4d8fff, 0xffff7a3d, 0xff3fd6a8,
+                                      0xffe58cc8, 0xffbfe6ff, 0xffc9a36b, 0xff9b8cff, 0xffffd8a8, 0xffdfe7ee };
     return Colour (c[band % 12]);
 }
 
