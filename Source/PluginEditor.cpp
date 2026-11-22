@@ -102,7 +102,7 @@ void PotatoEQEditor::showAnalyzerMenu()
     fill (vw, ana::viewNames, ana::view, 0, 600);
     fill (fl, ana::fillNames, ana::fill, 1, 700);
     {
-        const int cur = ana::get (st, ana::palette, 0);
+        const int cur = ana::get (st, ana::palette, ana::kDefaultPalette);
         for (int i = 0; i < (int) theme::palettePresets().size(); ++i) col.addItem (800 + i, theme::palettePresets()[(size_t) i].name, true, cur == i);
         col.addSeparator();
         col.addItem (899, "Custom colours...", true, cur >= (int) theme::palettePresets().size());
@@ -355,12 +355,34 @@ void PotatoEQEditor::paint (Graphics& g)
     g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.045f), 0, 0, Colours::white.withAlpha (0.0f), b.getWidth() * 0.45f, b.getHeight() * 0.6f, false));
     g.fillPath (refl);
 
+    // Aero atmosphere: a soft accent aurora and a few glossy bubbles drifting behind the panels
+    g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.16f), b.getWidth() * 0.15f, b.getBottom(),
+                                       theme::accent.withAlpha (0.0f), b.getWidth() * 0.55f, b.getHeight() * 0.35f, true));
+    g.fillRect (b);
+    g.setGradientFill (ColourGradient (theme::accent2.withAlpha (0.08f), b.getRight(), b.getY(),
+                                       theme::accent2.withAlpha (0.0f), b.getWidth() * 0.6f, b.getHeight() * 0.5f, true));
+    g.fillRect (b);
+    const float bubbles[][3] = { { 0.06f, 0.92f, 26 }, { 0.13f, 0.80f, 11 }, { 0.47f, 0.96f, 18 }, { 0.71f, 0.90f, 9 },
+                                 { 0.96f, 0.55f, 22 }, { 0.90f, 0.08f, 13 }, { 0.36f, 0.06f, 8 } };
+    for (auto& bb : bubbles)
+    {
+        const Point<float> c (b.getWidth() * bb[0], b.getHeight() * bb[1]);
+        const float r = bb[2];
+        auto body = Rectangle<float> (2 * r, 2 * r).withCentre (c);
+        g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.0f), c.x, c.y, theme::accent.withAlpha (0.22f), c.x + r, c.y, true));
+        g.fillEllipse (body);
+        g.setColour (Colours::white.withAlpha (0.25f)); g.drawEllipse (body, 1.0f);
+        auto hl = Rectangle<float> (r * 0.9f, r * 0.5f).withCentre ({ c.x - r * 0.25f, c.y - r * 0.5f });
+        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.55f), hl.getCentreX(), hl.getY(), Colours::white.withAlpha (0.0f), hl.getCentreX(), hl.getBottom(), false));
+        g.fillEllipse (hl);
+    }
+
     // iPhone OS style navigation bar: slate-blue gloss, chrome edge
     auto head = b.removeFromTop (44.0f).reduced (6.0f, 4.0f);
     g.setGradientFill (ColourGradient (theme::navTop, 0, head.getY(), theme::navBottom, 0, head.getBottom(), false));
     g.fillRoundedRectangle (head, theme::radius);
     auto gloss = head.withHeight (head.getHeight() * 0.5f);
-    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.30f), 0, gloss.getY(), Colours::white.withAlpha (0.08f), 0, gloss.getBottom(), false));
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.45f), 0, gloss.getY(), Colours::white.withAlpha (0.10f), 0, gloss.getBottom(), false));
     g.fillRoundedRectangle (gloss, theme::radius);
     g.setColour (Colours::black.withAlpha (0.45f));
     g.drawRoundedRectangle (head, theme::radius, 1.0f);

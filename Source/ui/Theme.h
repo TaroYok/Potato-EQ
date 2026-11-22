@@ -67,9 +67,13 @@ inline void drawGlassPanel (juce::Graphics& g, juce::Rectangle<float> r, float r
 {
     g.setGradientFill (juce::ColourGradient (tint.brighter (0.18f).withAlpha (0.92f), 0, r.getY(), tint.darker (0.35f).withAlpha (0.92f), 0, r.getBottom(), false));
     g.fillRoundedRectangle (r, rad);
-    auto sheen = r.reduced (2.0f).removeFromTop (juce::jmin (34.0f, r.getHeight() * 0.45f));
-    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.13f), 0, sheen.getY(), juce::Colours::white.withAlpha (0.0f), 0, sheen.getBottom(), false));
+    auto sheen = r.reduced (2.0f).removeFromTop (juce::jmin (40.0f, r.getHeight() * 0.5f));
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.22f), 0, sheen.getY(), juce::Colours::white.withAlpha (0.0f), 0, sheen.getBottom(), false));
     g.fillRoundedRectangle (sheen, rad - 2.0f);
+    // soft accent glow along the bottom edge (Aero light bounce)
+    auto glow = r.reduced (2.0f).removeFromBottom (juce::jmin (28.0f, r.getHeight() * 0.3f));
+    g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.0f), 0, glow.getY(), accent.withAlpha (0.10f), 0, glow.getBottom(), false));
+    g.fillRoundedRectangle (glow, rad - 2.0f);
     // chrome rim: brighter on top, darker at the bottom
     g.setGradientFill (juce::ColourGradient (chrome.withAlpha (0.55f), 0, r.getY(), chrome.withAlpha (0.12f), 0, r.getBottom(), false));
     g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.2f);
@@ -82,8 +86,12 @@ inline void drawOrb (juce::Graphics& g, juce::Point<float> c, float r, Colour co
     g.setGradientFill (juce::ColourGradient (col.brighter (bright ? 0.7f : 0.45f), c.x, c.y - r * 0.6f, col.darker (0.55f), c.x, c.y + r, true));
     g.fillEllipse (body);
     auto hl = juce::Rectangle<float> (r * 1.3f, r * 0.8f).withCentre ({ c.x, c.y - r * 0.42f });
-    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.75f), hl.getCentreX(), hl.getY(), juce::Colours::white.withAlpha (0.0f), hl.getCentreX(), hl.getBottom(), false));
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.9f), hl.getCentreX(), hl.getY(), juce::Colours::white.withAlpha (0.0f), hl.getCentreX(), hl.getBottom(), false));
     g.fillEllipse (hl);
+    // light caught in the bottom of the bubble
+    auto lo = juce::Rectangle<float> (r * 1.1f, r * 0.45f).withCentre ({ c.x, c.y + r * 0.6f });
+    g.setGradientFill (juce::ColourGradient (col.brighter (0.9f).withAlpha (0.0f), lo.getCentreX(), lo.getY(), col.brighter (0.9f).withAlpha (0.45f), lo.getCentreX(), lo.getBottom(), false));
+    g.fillEllipse (lo);
     g.setColour (juce::Colours::black.withAlpha (0.35f));
     g.drawEllipse (body, 1.0f);
 }
@@ -116,10 +124,11 @@ struct Scheme
 inline const std::array<Scheme, 6>& schemes()
 {
     static const std::array<Scheme, 6> s { {
+        // Dark Aero (default): purple-black glass with the gloss and aqua/lime pop of sky-and-nature Frutiger Aero
+        { "Dark Aero",      0xff2a1446, 0xff07030d, 0xff0c0716, 0xff2a1d44, 0xff3d2b62, 0xff261a3a, 0xff9d8fb8, 0xffffffff, 0xffbdb2d6,
+                            0xff3fd8ff, 0xffb6f24a, 0xffe6dcff, 0xff9a7bff, 0xff3b1d7a, 0xffffffff, 7 },
         { "iPod touch",     0xff2a2d33, 0xff040405, 0xff0a0c10, 0xff2b2f37, 0xff3d434e, 0xff262b33, 0xff8e96a3, 0xffffffff, 0xffa9b1bd,
                             0xff2f8bff, 0xff4cd964, 0xffd5dae1, 0xff9aaecb, 0xff4d6487, 0xffffffff, 0 },
-        { "Frutiger Aero",  0xff0f3352, 0xff06121f, 0xff071624, 0xff16344f, 0xff1f4a6e, 0xff1d3a55, 0xff7f9bb3, 0xffeaf6ff, 0xff9db8cc,
-                            0xff5ad1ff, 0xff9be564, 0xffbfe6ff, 0xff6fd3ff, 0xff1f7fb8, 0xffffffff, 1 },
         { "Silver Classic", 0xff3a3d42, 0xff15161a, 0xff0d0f12, 0xff3a3f47, 0xff4d545f, 0xff2c3138, 0xff9aa2ad, 0xffffffff, 0xffb8bfc9,
                             0xff4a90e2, 0xff7ed957, 0xffe9ecf0, 0xffeef0f3, 0xffaab2bd, 0xff1d2128, 5 },
         { "Midnight",       0xff1d1830, 0xff07050d, 0xff0b0814, 0xff2a2340, 0xff3b3158, 0xff241d36, 0xff9089a8, 0xfff5f0ff, 0xffb3abc9,
@@ -183,6 +192,7 @@ namespace ana
     inline const juce::StringArray fillNames { "Outline only", "Colour by level", "Heat map (by height)", "Slices (bars)" };
     inline const double tiltValues[] = { 0.0, 3.0, 4.5, 6.0 };
     inline const double rangeValues[] = { 60.0, 90.0, 120.0 };
+    constexpr int kDefaultPalette = 7;   // Aero Violet, matches the default Dark Aero scheme
     inline int get (const juce::ValueTree& s, const juce::Identifier& id, int def) { return (int) s.getProperty (id, def); }
 }
 
@@ -208,13 +218,13 @@ inline const std::array<PalettePreset, 8>& palettePresets()
         { "Ember",        0xfffff7d6, 0xffff7b00, 0xff3a0a00 },
         { "Ice",          0xffffffff, 0xff9fc9ff, 0xff1b2a4a },
         { "Potato Gold",  0xfffff6d5, 0xffe8b04b, 0xff3b2600 },
-        { "Neon Violet",  0xfff5e6ff, 0xffb26bff, 0xff22075a } } };
+        { "Aero Violet",  0xffe6fbff, 0xff9b5cff, 0xff1a0633 } } };
     return p;
 }
 
 inline Palette paletteFrom (const juce::ValueTree& s)
 {
-    const int idx = ana::get (s, ana::palette, 0);
+    const int idx = ana::get (s, ana::palette, ana::kDefaultPalette);
     if (idx >= 0 && idx < (int) palettePresets().size())
     {
         const auto& p = palettePresets()[(size_t) idx];
