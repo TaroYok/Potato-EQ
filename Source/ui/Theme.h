@@ -81,23 +81,27 @@ inline void drawAeroSheen (juce::Graphics& g, juce::Rectangle<float> r, float ra
     g.drawHorizontalLine ((int) r.getY() + 1, r.getX() + rad * 0.6f, r.getRight() - rad * 0.6f);
 }
 
-// Rounded glass panel: see-through tinted body (the background glows through), curved Aero gloss,
-// accent light pooling at the bottom, and a chrome rim that picks up the accent colour.
-inline void drawGlassPanel (juce::Graphics& g, juce::Rectangle<float> r, float rad = radius, Colour tint = panel)
+// Rounded clear-glass panel: a thin dark tint you can see the scene through (no frosting), a crisp
+// curved Aero gloss, accent light pooling at the bottom, and a bright chrome rim.
+// `smoke` adds a clear dark tint (not frost) for sheets that float over the busy analyzer.
+inline void drawGlassPanel (juce::Graphics& g, juce::Rectangle<float> r, float rad = radius, Colour tint = panel, float smoke = 0.0f)
 {
-    g.setGradientFill (juce::ColourGradient (tint.brighter (0.25f).withAlpha (0.62f), 0, r.getY(), tint.darker (0.45f).withAlpha (0.80f), 0, r.getBottom(), false));
+    if (smoke > 0.0f) { g.setColour (juce::Colour (0xff05020c).withAlpha (smoke)); g.fillRoundedRectangle (r, rad); }
+    g.setGradientFill (juce::ColourGradient (tint.withAlpha (0.42f), 0, r.getY(), tint.darker (0.6f).withAlpha (0.62f), 0, r.getBottom(), false));
     g.fillRoundedRectangle (r, rad);
-    // light pooling at the bottom edge
     auto glow = r.reduced (2.0f).removeFromBottom (juce::jmin (60.0f, r.getHeight() * 0.4f));
-    g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.0f), 0, glow.getY(), accent.withAlpha (0.16f), 0, glow.getBottom(), false));
+    g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.0f), 0, glow.getY(), accent.withAlpha (0.22f), 0, glow.getBottom(), false));
     g.fillRoundedRectangle (glow, rad - 2.0f);
-    drawAeroSheen (g, r.reduced (1.5f), rad - 1.5f, 0.75f);
-    // rim: bright chrome on top fading to an accent tint at the bottom
-    g.setGradientFill (juce::ColourGradient (chrome.withAlpha (0.75f), 0, r.getY(), accent.withAlpha (0.35f), 0, r.getBottom(), false));
-    g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.3f);
-    g.setColour (juce::Colours::black.withAlpha (0.35f));
-    g.drawRoundedRectangle (r.reduced (1.8f), rad - 1.3f, 0.8f);
+    drawAeroSheen (g, r.reduced (1.5f), rad - 1.5f, 0.85f);
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.85f), 0, r.getY(), accent.withAlpha (0.55f), 0, r.getBottom(), false));
+    g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.4f);
+    g.setColour (juce::Colours::black.withAlpha (0.25f));
+    g.drawRoundedRectangle (r.reduced (1.9f), rad - 1.4f, 0.8f);
 }
+
+// The scene behind everything (Display > Background): 0 = sky and nature, 1 = colour void.
+inline int& backdropMode() { static int m = 0; return m; }
+void paintScene (juce::Graphics&, juce::Rectangle<float> area, int mode, bool simple = false);   // Panels.cpp
 
 // Glossy orb (knob caps, band nodes, toggle bubbles).
 inline void drawOrb (juce::Graphics& g, juce::Point<float> c, float r, Colour col, bool bright = false)
@@ -199,9 +203,10 @@ namespace ana
                                   speed ("anaSpeed"), tilt ("anaTilt"), range ("anaRange"),
                                   showSc ("anaShowSc"), collide ("anaCollide"), smoothing ("anaSmooth"), noteGrid ("anaNoteGrid"),
                                   view ("anaView"), fill ("anaFill"), palette ("anaPalette"), customLight ("anaLight"), customDark ("anaDark"),
-                                  scheme ("uiScheme"), units ("uiUnits"), uiFont ("uiFont"),
+                                  scheme ("uiScheme"), units ("uiUnits"), uiFont ("uiFont"), backdrop ("uiBackdrop"), modLoudness ("modLoudness"),
                                   cmpWith ("cmpWith"), cmpSens ("cmpSens");
     inline juce::Identifier customSlot (int i) { return juce::Identifier ("uiC" + juce::String (i)); }
+    inline const juce::StringArray backdropNames { "Sky and nature", "Colour void" };
     inline const juce::StringArray unitNames { "LUFS", "dB (dBFS)", "Both" };
     inline const juce::StringArray smoothingNames { "Off (1/48 oct)", "Light (1/24 oct)", "Medium (1/12 oct)", "Heavy (1/6 oct)", "Very heavy (1/3 oct)" };
     inline const juce::StringArray resolutionNames { "Low", "Medium", "High", "Maximum" };   // FFT 2k/4k/8k/16k
@@ -259,6 +264,7 @@ inline Palette paletteFrom (const juce::ValueTree& s)
 // Scheme from the plugin state: a preset, or the custom colours.
 inline void applySchemeFromState (const juce::ValueTree& st)
 {
+    backdropMode() = juce::jlimit (0, 1, ana::get (st, ana::backdrop, 0));
     const int idx = ana::get (st, ana::scheme, 0);
     if (idx < (int) schemes().size()) { applyScheme (idx); return; }
     auto k = slotsFromScheme (0);

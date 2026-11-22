@@ -529,6 +529,24 @@ int main (int argc, char** argv)
         FileOutputStream os (f);
         PNGImageFormat().writeImageToStream (img, os);
         check (f.existsAsFile(), "editor rendered to " + f.getFileName(), 1, 1);
+        // module sheets, the settings sheet and the colour-void background
+        if (auto* pe = dynamic_cast<PotatoEQEditor*> (ed.get()))
+        {
+            auto shot = [&] (const char* suffix)
+            {
+                for (int i = 0; i < 10; ++i) { run (*p, 0.03, pinkish); pump (25); }
+                auto im = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+                File sf = f.getSiblingFile (f.getFileNameWithoutExtension() + suffix);
+                sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so);
+            };
+            pe->openModule (0); shot ("-sheet-loudness.png");
+            pe->openModule (1); shot ("-sheet-autoeq.png");
+            pe->openModule (-1); pe->showSettings (true); shot ("-settings.png");
+            pe->showSettings (false);
+            pe->setBackdrop (1); shot ("-void.png");
+            pe->openModule (0); shot ("-void-sheet.png");
+            pe->openModule (-1); pe->setBackdrop (0);
+        }
         // style samples: fill styles, palettes and views
         if (auto* pe = dynamic_cast<PotatoEQEditor*> (ed.get()))
             for (int sc = 0; sc < (int) theme::schemes().size(); ++sc)

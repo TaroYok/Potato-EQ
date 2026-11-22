@@ -37,7 +37,7 @@ static void drawPill (Graphics& g, Rectangle<float> r, Colour base, bool over, b
 {
     const float rad = jmin (r.getHeight() * 0.5f, 10.0f);
     auto c = down ? base.brighter (0.25f) : over ? base.brighter (0.15f) : base;
-    g.setGradientFill (ColourGradient (c.brighter (0.3f).withAlpha (0.85f), 0, r.getY(), c.darker (0.45f).withAlpha (0.92f), 0, r.getBottom(), false));
+    g.setGradientFill (ColourGradient (c.brighter (0.3f).withAlpha (0.55f), 0, r.getY(), c.darker (0.45f).withAlpha (0.75f), 0, r.getBottom(), false));
     g.fillRoundedRectangle (r, rad);
     auto glow = r.reduced (1.5f).removeFromBottom (r.getHeight() * 0.45f);
     g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.0f), 0, glow.getY(), theme::accent.withAlpha (over ? 0.35f : 0.18f), 0, glow.getBottom(), false));
@@ -112,14 +112,14 @@ void PotatoLookAndFeel::positionComboBoxText (ComboBox& box, Label& label)
 
 void PotatoLookAndFeel::drawPopupMenuBackground (Graphics& g, int w, int h)
 {
+    // menus share the window's scene (sky or colour void) behind a clear dark glass so the text stays readable
     const auto r = Rectangle<float> (0, 0, (float) w, (float) h);
-    g.setGradientFill (ColourGradient (theme::panel.darker (0.1f), 0, 0, theme::panel.darker (0.5f), 0, r.getBottom(), false));
-    g.fillAll();
-    auto top = r.withHeight (jmin (40.0f, r.getHeight() * 0.3f));
-    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.12f), 0, 0, Colours::white.withAlpha (0.0f), 0, top.getBottom(), false));
-    g.fillRect (top);
-    g.setColour (theme::accent.withAlpha (0.35f));
-    g.drawRect (r, 1.0f);
+    theme::paintScene (g, r, theme::backdropMode(), true);
+    g.setGradientFill (ColourGradient (theme::panel.darker (0.4f).withAlpha (0.62f), 0, 0, theme::panel.darker (0.8f).withAlpha (0.74f), 0, r.getBottom(), false));
+    g.fillRect (r);
+    theme::drawAeroSheen (g, r, 2.0f, 0.6f);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.8f), 0, 0, theme::accent.withAlpha (0.6f), 0, r.getBottom(), false));
+    g.drawRect (r, 1.2f);
 }
 
 void PotatoLookAndFeel::drawToggleButton (Graphics& g, ToggleButton& b, bool over, bool)
@@ -287,7 +287,7 @@ void BandPanel::timerCallback()
 void BandPanel::paint (Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
-    theme::drawGlassPanel (g, bounds);
+    theme::drawGlassPanel (g, bounds, theme::radius, theme::panel, 0.5f);
     if (band < 0)
     {
         g.setColour (theme::textDim); g.setFont (theme::font (13.0f));
@@ -409,7 +409,7 @@ void LoudnessPanel::timerCallback()
 
 void LoudnessPanel::paint (Graphics& g)
 {
-    theme::drawGlassPanel (g, getLocalBounds().toFloat());
+    theme::drawGlassPanel (g, getLocalBounds().toFloat(), theme::radius, theme::panel, 0.5f);
     auto r0 = getLocalBounds().reduced (12, 10);
     g.setColour (theme::text); g.setFont (theme::font (13.0f, true));
     const int units = jmax (0, lastUnits);
@@ -603,7 +603,7 @@ void AutoPanel::timerCallback()
 
 void AutoPanel::paint (Graphics& g)
 {
-    theme::drawGlassPanel (g, getLocalBounds().toFloat());
+    theme::drawGlassPanel (g, getLocalBounds().toFloat(), theme::radius, theme::panel, 0.5f);
     auto r = getLocalBounds().reduced (12, 10);
     g.setColour (theme::text); g.setFont (theme::font (13.0f, true));
     g.drawText ("AUTO EQ", r.removeFromTop (18), Justification::centredLeft);
@@ -735,7 +735,7 @@ void LevelMeters::mouseDown (const MouseEvent&) { proc.resetMeter(); }
 
 void LevelMeters::paint (Graphics& g)
 {
-    theme::drawGlassPanel (g, getLocalBounds().toFloat());
+    theme::drawGlassPanel (g, getLocalBounds().toFloat(), theme::radius, theme::panel, 0.5f);
     const bool db = ana::get (proc.apvts.state, ana::units, 0) == 1;
     const bool lim = proc.apvts.getRawParameterValue (params::id::limiter)->load() > 0.5f;
     auto area = getLocalBounds().toFloat().reduced (8.0f, 14.0f);
@@ -835,4 +835,237 @@ void theme::setUiFont (int index)
     uiBold() = f.b != nullptr ? Typeface::createSystemTypefaceFor (f.b, (size_t) f.bn) : nullptr;
     const float scales[] = { 1.0f, 1.16f, 1.06f, 1.14f, 1.10f, 1.16f, 1.07f };   // match the classic font's visual size
     uiFontScale() = scales[jlimit (0, (int) std::size (scales) - 1, index)];
+}
+
+// ---------------------------------------------------------------- scenes behind the glass
+namespace
+{
+void drawBubble (Graphics& g, Point<float> c, float r, Colour tint)
+{
+    auto body = Rectangle<float> (2 * r, 2 * r).withCentre (c);
+    g.setGradientFill (ColourGradient (tint.withAlpha (0.02f), c.x, c.y, tint.withAlpha (0.35f), c.x + r, c.y, true));
+    g.fillEllipse (body);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.8f), c.x, c.y - r, tint.withAlpha (0.45f), c.x, c.y + r, false));
+    g.drawEllipse (body, r > 20 ? 1.5f : 1.0f);
+    auto hl = Rectangle<float> (r * 0.95f, r * 0.55f).withCentre ({ c.x - r * 0.22f, c.y - r * 0.48f });
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.85f), hl.getCentreX(), hl.getY(), Colours::white.withAlpha (0.0f), hl.getCentreX(), hl.getBottom(), false));
+    g.fillEllipse (hl);
+    g.setColour (Colours::white.withAlpha (0.7f));
+    g.fillEllipse (Rectangle<float> (r * 0.16f, r * 0.16f).withCentre ({ c.x + r * 0.5f, c.y + r * 0.5f }));
+}
+
+void drawCloud (Graphics& g, Point<float> c, float s)
+{
+    const float puffs[][3] = { { 0, 0, 1.0f }, { -0.95f, 0.22f, 0.68f }, { 0.95f, 0.2f, 0.74f }, { -0.42f, -0.38f, 0.66f },
+                               { 0.45f, -0.32f, 0.72f }, { -1.6f, 0.38f, 0.42f }, { 1.6f, 0.36f, 0.46f } };
+    Path cloud;
+    for (auto& p : puffs)
+        cloud.addEllipse (Rectangle<float> (s * p[2] * 2.0f, s * p[2] * 1.7f).withCentre ({ c.x + s * p[0], c.y + s * p[1] }));
+    g.setColour (Colour (0xff2a6fb8).withAlpha (0.12f));   // soft shadow
+    g.fillPath (cloud, AffineTransform::translation (0, s * 0.18f));
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.97f), c.x, c.y - s, Colour (0xffcfe9ff).withAlpha (0.88f), c.x, c.y + s * 0.8f, false));
+    g.fillPath (cloud);
+}
+
+Path hill (Rectangle<float> b, float base, const std::vector<float>& waves)
+{
+    Path p;
+    p.startNewSubPath (b.getX(), b.getBottom());
+    p.lineTo (b.getX(), b.getY() + b.getHeight() * base);
+    const int n = (int) waves.size();
+    for (int i = 0; i < n; ++i)
+    {
+        const float x0 = b.getX() + b.getWidth() * (float) i / (float) n, x1 = b.getX() + b.getWidth() * (float) (i + 1) / (float) n;
+        const float yEnd = b.getY() + b.getHeight() * (base + (i + 1 < n ? waves[(size_t) i + 1] * 0.25f : 0.0f));
+        p.quadraticTo ((x0 + x1) * 0.5f, b.getY() + b.getHeight() * (base - waves[(size_t) i]), x1, yEnd);
+    }
+    p.lineTo (b.getRight(), b.getBottom());
+    p.closeSubPath();
+    return p;
+}
+} // namespace
+
+void theme::paintScene (Graphics& g, Rectangle<float> b, int mode, bool simple)
+{
+    const float w = b.getWidth(), h = b.getHeight();
+    auto at = [&] (float fx, float fy) { return Point<float> (b.getX() + w * fx, b.getY() + h * fy); };
+    if (mode == 1)
+    {   // colour void: an endless, softly lit expanse of colour around a deep centre
+        g.setColour (Colour (0xff06030f)); g.fillRect (b);
+        auto blob = [&] (Colour c, float a, float fx, float fy, float rad)
+        {
+            const auto p = at (fx, fy);
+            g.setGradientFill (ColourGradient (c.withAlpha (a), p.x, p.y, c.withAlpha (0.0f), p.x + jmax (w, h) * rad, p.y, true));
+            g.fillRect (b);
+        };
+        blob (Colour (0xffff3fb4), 0.70f, 0.08f, 0.22f, 0.55f);   // magenta
+        blob (Colour (0xff7a3cff), 0.80f, 0.85f, 0.10f, 0.60f);   // violet
+        blob (Colour (0xff1fd2ff), 0.65f, 0.78f, 0.95f, 0.55f);   // aqua
+        blob (Colour (0xffff8a3d), 0.45f, 0.18f, 1.00f, 0.45f);   // orange
+        blob (Colour (0xffb6f24a), 0.22f, 1.00f, 0.55f, 0.35f);   // lime
+        blob (Colour (0xff3a5bff), 0.40f, 0.45f, 0.00f, 0.40f);   // blue
+        const auto c = at (0.5f, 0.52f);   // the void itself: darkness falling away into the centre
+        g.setGradientFill (ColourGradient (Colour (0xff020106).withAlpha (0.92f), c.x, c.y, Colour (0xff020106).withAlpha (0.0f), c.x + jmax (w, h) * 0.42f, c.y, true));
+        g.fillRect (b);
+        if (! simple)
+        {
+            Random rng (20261122);
+            for (int i = 0; i < 220; ++i)
+            {
+                const auto p = at (rng.nextFloat(), rng.nextFloat());
+                const float sz = 0.6f + rng.nextFloat() * 1.6f;
+                g.setColour (Colours::white.withAlpha (0.15f + rng.nextFloat() * 0.6f));
+                g.fillEllipse (Rectangle<float> (sz, sz).withCentre (p));
+            }
+            for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.10f, 0.80f, 34 }, { 0.92f, 0.70f, 26 }, { 0.62f, 0.12f, 18 }, { 0.30f, 0.15f, 12 } })
+                drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xff9be7ff));
+        }
+        return;
+    }
+
+    // sky and nature: deep blue sky, sun, clouds, glossy green hills and bubbles
+    g.setGradientFill ([&] {
+        ColourGradient sky (Colour (0xff0a5bc4), 0, b.getY(), Colour (0xffd6f6ff), 0, b.getY() + h * 0.76f, false);
+        sky.addColour (0.55, Colour (0xff4fb8ff));
+        return sky; }());
+    g.fillRect (b);
+    const auto sun = at (0.86f, 0.08f);
+    g.setGradientFill (ColourGradient (Colour (0xfffffbe0).withAlpha (0.95f), sun.x, sun.y, Colour (0xfffff2b0).withAlpha (0.0f), sun.x + w * 0.38f, sun.y, true));
+    g.fillRect (b);
+    for (int i = 0; i < 10; ++i)
+    {   // sun rays
+        const float a = MathConstants<float>::pi * (0.52f + 0.075f * (float) i);
+        Path ray;
+        ray.startNewSubPath (sun);
+        ray.lineTo (sun + Point<float> (std::cos (a - 0.018f), std::sin (a - 0.018f)) * w * 1.3f);
+        ray.lineTo (sun + Point<float> (std::cos (a + 0.018f), std::sin (a + 0.018f)) * w * 1.3f);
+        ray.closeSubPath();
+        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.16f), sun.x, sun.y, Colours::white.withAlpha (0.0f), sun.x - w * 0.6f, sun.y + h * 0.7f, false));
+        g.fillPath (ray);
+    }
+    const float s = jmin (w, h);
+    drawCloud (g, at (0.18f, 0.20f), s * 0.07f);
+    drawCloud (g, at (0.52f, 0.12f), s * 0.05f);
+    if (! simple)
+    {
+        drawCloud (g, at (0.70f, 0.34f), s * 0.06f);
+        drawCloud (g, at (0.34f, 0.42f), s * 0.045f);
+        drawCloud (g, at (0.95f, 0.46f), s * 0.05f);
+    }
+    // hills: far, middle and near, each a glossy green with a bright rim
+    struct Layer { float base; std::vector<float> waves; Colour top, bottom; };
+    const Layer layers[] = { { 0.70f, { 0.06f, 0.10f, 0.04f, 0.09f, 0.05f }, Colour (0xff9fe87c), Colour (0xff3f9f52) },
+                             { 0.78f, { 0.09f, 0.03f, 0.11f, 0.05f }, Colour (0xff7fdc4c), Colour (0xff23863a) },
+                             { 0.88f, { 0.05f, 0.10f, 0.06f }, Colour (0xff6fd83c), Colour (0xff146b2a) } };
+    for (auto& l : layers)
+    {
+        const auto p = hill (b, l.base, l.waves);
+        g.setGradientFill (ColourGradient (l.top, 0, b.getY() + h * (l.base - 0.1f), l.bottom, 0, b.getBottom(), false));
+        g.fillPath (p);
+        g.setColour (Colours::white.withAlpha (0.35f));
+        g.strokePath (p, PathStrokeType (1.6f));
+        Graphics::ScopedSaveState ss (g);   // glossy band along the hilltop
+        g.reduceClipRegion (p);
+        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.28f), 0, b.getY() + h * (l.base - 0.1f), Colours::white.withAlpha (0.0f), 0, b.getY() + h * (l.base + 0.05f), false));
+        g.fillRect (b);
+    }
+    if (simple) return;
+    for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.05f, 0.62f, 30 }, { 0.12f, 0.50f, 12 }, { 0.30f, 0.60f, 52 }, { 0.47f, 0.30f, 20 },
+                                                               { 0.58f, 0.55f, 64 }, { 0.71f, 0.22f, 10 }, { 0.66f, 0.70f, 32 }, { 0.83f, 0.58f, 44 },
+                                                               { 0.96f, 0.30f, 22 }, { 0.40f, 0.06f, 9 }, { 0.22f, 0.84f, 18 }, { 0.88f, 0.86f, 14 } })
+        drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xff9be7ff));
+}
+
+// ---------------------------------------------------------------- icon buttons and the module dock
+void GlassIconButton::paintButton (Graphics& g, bool over, bool down)
+{
+    const auto r = getLocalBounds().toFloat().reduced (1.0f);
+    drawPill (g, r, getToggleState() ? theme::accent.darker (0.2f) : theme::panelHi, over, down);
+    const auto c = r.getCentre();
+    const float s = jmin (r.getWidth(), r.getHeight()) * 0.30f;
+    Path p;
+    if (icon == plus)
+    {
+        p.addRoundedRectangle (Rectangle<float> (s * 2.0f, s * 0.45f).withCentre (c), s * 0.2f);
+        p.addRoundedRectangle (Rectangle<float> (s * 0.45f, s * 2.0f).withCentre (c), s * 0.2f);
+    }
+    else
+    {   // cog: eight teeth around a ring
+        const int teeth = 8;
+        for (int i = 0; i < teeth * 4; ++i)
+        {
+            const float a = MathConstants<float>::twoPi * (float) i / (float) (teeth * 4);
+            const float rad = (i % 4 == 0 || i % 4 == 1) ? s * 1.08f : s * 0.80f;
+            const auto pt = c + Point<float> (std::cos (a), std::sin (a)) * rad;
+            if (i == 0) p.startNewSubPath (pt); else p.lineTo (pt);
+        }
+        p.closeSubPath();
+        p.addEllipse (Rectangle<float> (s * 0.8f, s * 0.8f).withCentre (c));
+        p.setUsingNonZeroWinding (false);
+    }
+    g.setColour (theme::accent.withAlpha (0.45f));
+    g.fillPath (p, AffineTransform::translation (0, 1.0f));
+    g.setColour (Colours::white);
+    g.fillPath (p);
+}
+
+void ModuleDock::setItems (std::vector<Item> it, int openId)
+{
+    items = std::move (it); open = openId; repaint();
+}
+
+int ModuleDock::slotAt (Point<int> pt) const
+{
+    for (int i = 0; i < (int) items.size(); ++i)
+        if (Rectangle<int> (14 + i * kSlot, 0, kSlot, getHeight()).contains (pt)) return i;
+    return -1;
+}
+
+void ModuleDock::mouseMove (const MouseEvent& e) { const int h = slotAt (e.getPosition()); if (h != hover) { hover = h; repaint(); } }
+void ModuleDock::mouseUp (const MouseEvent& e)
+{
+    const int i = slotAt (e.getPosition());
+    if (i >= 0 && onClick) onClick (items[(size_t) i].id);
+}
+
+void ModuleDock::paint (Graphics& g)
+{
+    if (items.empty()) return;
+    const auto shelf = getLocalBounds().toFloat().reduced (2.0f).withTrimmedTop (getHeight() * 0.30f);
+    theme::drawGlassPanel (g, shelf, 18.0f, theme::panel.darker (0.2f));
+    for (int i = 0; i < (int) items.size(); ++i)
+    {
+        const bool isOpen = items[(size_t) i].id == open, over = i == hover;
+        const auto c = Point<float> (14.0f + (float) i * kSlot + kSlot * 0.5f, (float) getHeight() * 0.42f - (over ? 3.0f : 0.0f));
+        const float r = 22.0f;
+        if (isOpen || over)
+        {
+            g.setGradientFill (ColourGradient (theme::accent.withAlpha (isOpen ? 0.6f : 0.35f), c.x, c.y, theme::accent.withAlpha (0.0f), c.x + r * 1.9f, c.y, true));
+            g.fillEllipse (Rectangle<float> (r * 3.8f, r * 3.8f).withCentre (c));
+        }
+        theme::drawOrb (g, c, r, isOpen ? theme::accent : theme::accent.darker (0.45f).withSaturation (0.7f), isOpen || over);
+        Path icon;
+        if (items[(size_t) i].id == loudnessModule)
+        {   // rising level bars
+            for (int k = 0; k < 4; ++k)
+            {
+                const float bh = 6.0f + 4.0f * (float) k;
+                icon.addRoundedRectangle (Rectangle<float> (c.x - 11.0f + 6.0f * (float) k, c.y + 9.0f - bh, 4.0f, bh), 1.5f);
+            }
+        }
+        else
+        {   // EQ curve with a spark
+            Path wave;
+            wave.startNewSubPath (c.x - 13, c.y + 4);
+            wave.cubicTo (c.x - 6, c.y + 4, c.x - 5, c.y - 8, c.x, c.y - 8);
+            wave.cubicTo (c.x + 5, c.y - 8, c.x + 6, c.y + 6, c.x + 13, c.y + 6);
+            PathStrokeType (3.0f, PathStrokeType::curved, PathStrokeType::rounded).createStrokedPath (icon, wave);
+            icon.addStar ({ c.x + 9, c.y - 9 }, 4, 1.6f, 4.0f);
+        }
+        g.setColour (Colours::black.withAlpha (0.35f)); g.fillPath (icon, AffineTransform::translation (0, 1.0f));
+        g.setColour (Colours::white); g.fillPath (icon);
+        g.setColour (isOpen ? Colours::white : theme::text.withAlpha (0.85f));
+        g.setFont (theme::font (11.0f, isOpen));
+        g.drawText (items[(size_t) i].name, Rectangle<float> (14.0f + (float) i * kSlot, (float) getHeight() - 22.0f, (float) kSlot, 16.0f), Justification::centred);
+    }
 }
