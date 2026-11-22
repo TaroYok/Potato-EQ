@@ -143,7 +143,8 @@ struct Scheme
 {
     const char* name;
     juce::uint32 bgTop, bgBottom, plotBg, panel, panelHi, grid, gridText, text, textDim, accent, accent2, chrome, navTop, navBottom, navText;
-    int palette;   // matching analyzer gradient
+    int palette;         // matching analyzer gradient
+    int backdrop = -1;   // themes also pick the scene behind the glass (-1: leave it)
 };
 inline const std::array<Scheme, 6>& schemes()
 {
@@ -164,6 +165,34 @@ inline const std::array<Scheme, 6>& schemes()
     return s;
 }
 
+// Themes: a colour scheme, scene and analyzer colours that belong together. Their indices start at
+// kFirstTheme so projects saved with the older numbering (custom = 6) keep their look.
+constexpr int kCustomScheme = 6, kFirstTheme = 7, kDefaultScheme = 7;   // default: Sky Aero
+inline const std::vector<Scheme>& themeSchemes()
+{
+    static const std::vector<Scheme> t {
+        { "Sky Aero",       0xff0a5bc4, 0xff06243f, 0xff071a33, 0xff12365e, 0xff1f5a8f, 0xff1f4a73, 0xffa9cbe8, 0xffffffff, 0xffcfe6f7,
+                            0xff3fd8ff, 0xffb6f24a, 0xffe8f8ff, 0xff7fd0ff, 0xff1565b8, 0xffffffff, 1, 0 },
+        { "Ocean",          0xff0a4a6e, 0xff021522, 0xff03192a, 0xff0c3a50, 0xff15586f, 0xff134560, 0xff98c8d8, 0xffeefcff, 0xffb7dde6,
+                            0xff35f0d8, 0xffffb05a, 0xffd8fbff, 0xff4fd8e8, 0xff0b5d80, 0xffffffff, 2, 2 },
+        { "Sunset Beach",   0xff5a1e5e, 0xff1a0820, 0xff1c0a22, 0xff4a1f4a, 0xff6a2f62, 0xff3d1c3d, 0xffd6a8c4, 0xfffff6ee, 0xffefc9d6,
+                            0xffffa94a, 0xff5fd0ff, 0xffffe6d0, 0xffff9a6a, 0xffa8326e, 0xffffffff, 3, 3 },
+        { "Aurora Night",   0xff0d1a3a, 0xff020510, 0xff040a1c, 0xff12224a, 0xff1d3468, 0xff16264a, 0xff8ea6d0, 0xfff2fbff, 0xffb4c8e6,
+                            0xff4dffb0, 0xffc08cff, 0xffd8f0ff, 0xff5a7bd8, 0xff1a2a6e, 0xffffffff, 2, 4 },
+        { "Meadow",         0xff2f7a2a, 0xff0b2a0c, 0xff0a1f12, 0xff1c4a2c, 0xff2c6a3e, 0xff1d4a2a, 0xffb2d8b0, 0xffffffff, 0xffd5ecd0,
+                            0xffc8f54a, 0xff56c8ff, 0xfff0ffe0, 0xff8fdc5a, 0xff2a7f3a, 0xffffffff, 2, 5 },
+        { "Colour Void",    0xff1d0b33, 0xff05020c, 0xff07040f, 0xff261640, 0xff3a2460, 0xff22163a, 0xffa898c8, 0xffffffff, 0xffd0c4ee,
+                            0xff1fd2ff, 0xffff6ad5, 0xffeee0ff, 0xffb06bff, 0xff4a1f8a, 0xffffffff, 7, 1 } };
+    return t;
+}
+inline int numSchemeSlots() { return kFirstTheme + (int) themeSchemes().size(); }
+inline const Scheme* schemeAt (int i)
+{
+    if (i >= 0 && i < (int) schemes().size()) return &schemes()[(size_t) i];
+    if (i >= kFirstTheme && i < numSchemeSlots()) return &themeSchemes()[(size_t) (i - kFirstTheme)];
+    return nullptr;   // kCustomScheme (or unknown)
+}
+
 // Custom scheme: the user picks these; everything else is derived from them.
 inline const juce::StringArray customSlotNames { "Background", "Panels", "Analyzer background", "Accent", "Second accent",
                                                  "Title bar", "Text", "Title text", "Rims / chrome" };
@@ -171,7 +200,8 @@ constexpr int kCustomSlots = 9;
 
 inline std::array<Colour, kCustomSlots> slotsFromScheme (int index)
 {
-    const auto& c = schemes()[(size_t) juce::jlimit (0, (int) schemes().size() - 1, index)];
+    const auto* sp = schemeAt (index);
+    const auto& c = sp != nullptr ? *sp : themeSchemes()[0];
     return { Colour (c.bgTop), Colour (c.panel), Colour (c.plotBg), Colour (c.accent), Colour (c.accent2),
              Colour (c.navTop).interpolatedWith (Colour (c.navBottom), 0.5f), Colour (c.text), Colour (c.navText), Colour (c.chrome) };
 }
@@ -189,7 +219,8 @@ inline void applyCustom (const std::array<Colour, kCustomSlots>& k)
 
 inline void applyScheme (int index)
 {
-    const auto& c = schemes()[(size_t) juce::jlimit (0, (int) schemes().size() - 1, index)];
+    const auto* sp = schemeAt (index);
+    const auto& c = sp != nullptr ? *sp : themeSchemes()[0];
     bgTop = Colour (c.bgTop); bgBottom = Colour (c.bgBottom); plotBg = Colour (c.plotBg); bg = Colour (c.bgBottom).brighter (0.1f);
     panel = Colour (c.panel); panelHi = Colour (c.panelHi); grid = Colour (c.grid); gridText = Colour (c.gridText);
     text = Colour (c.text); textDim = Colour (c.textDim); accent = Colour (c.accent); accent2 = Colour (c.accent2);
@@ -206,7 +237,7 @@ namespace ana
                                   scheme ("uiScheme"), units ("uiUnits"), uiFont ("uiFont"), backdrop ("uiBackdrop"), modLoudness ("modLoudness"),
                                   cmpWith ("cmpWith"), cmpSens ("cmpSens");
     inline juce::Identifier customSlot (int i) { return juce::Identifier ("uiC" + juce::String (i)); }
-    inline const juce::StringArray backdropNames { "Sky and nature", "Colour void" };
+    inline const juce::StringArray backdropNames { "Sky and nature", "Colour void", "Ocean", "Sunset beach", "Aurora night", "Meadow" };
     inline const juce::StringArray unitNames { "LUFS", "dB (dBFS)", "Both" };
     inline const juce::StringArray smoothingNames { "Off (1/48 oct)", "Light (1/24 oct)", "Medium (1/12 oct)", "Heavy (1/6 oct)", "Very heavy (1/3 oct)" };
     inline const juce::StringArray resolutionNames { "Low", "Medium", "High", "Maximum" };   // FFT 2k/4k/8k/16k
@@ -217,7 +248,7 @@ namespace ana
     inline const juce::StringArray fillNames { "Outline only", "Colour by level", "Heat map (by height)", "Slices (bars)" };
     inline const double tiltValues[] = { 0.0, 3.0, 4.5, 6.0 };
     inline const double rangeValues[] = { 60.0, 90.0, 120.0 };
-    constexpr int kDefaultPalette = 7;   // Aero Violet, matches the default Dark Aero scheme
+    constexpr int kDefaultPalette = 1;   // Aero Sky, matches the default Sky Aero theme
     inline int get (const juce::ValueTree& s, const juce::Identifier& id, int def) { return (int) s.getProperty (id, def); }
 }
 
@@ -264,9 +295,9 @@ inline Palette paletteFrom (const juce::ValueTree& s)
 // Scheme from the plugin state: a preset, or the custom colours.
 inline void applySchemeFromState (const juce::ValueTree& st)
 {
-    backdropMode() = juce::jlimit (0, 1, ana::get (st, ana::backdrop, 0));
-    const int idx = ana::get (st, ana::scheme, 0);
-    if (idx < (int) schemes().size()) { applyScheme (idx); return; }
+    backdropMode() = juce::jlimit (0, ana::backdropNames.size() - 1, ana::get (st, ana::backdrop, 0));
+    const int idx = ana::get (st, ana::scheme, kDefaultScheme);
+    if (schemeAt (idx) != nullptr) { applyScheme (idx); return; }
     auto k = slotsFromScheme (0);
     for (int i = 0; i < kCustomSlots; ++i)
         if (st.hasProperty (ana::customSlot (i))) k[(size_t) i] = Colour ((juce::uint32) (juce::int64) st.getProperty (ana::customSlot (i)));

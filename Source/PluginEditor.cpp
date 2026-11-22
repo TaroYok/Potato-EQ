@@ -188,13 +188,16 @@ void PotatoEQEditor::showAnalyzerMenu()
         col.addItem (899, "Custom colours...", true, cur >= (int) theme::palettePresets().size());
     }
     {
-        const int cur = ana::get (st, ana::scheme, 0);
+        const int cur = ana::get (st, ana::scheme, theme::kDefaultScheme);
+        sch.addSectionHeader ("Themes (colours + scene)");
+        for (int i = theme::kFirstTheme; i < theme::numSchemeSlots(); ++i) sch.addItem (950 + i, theme::schemeAt (i)->name, true, cur == i);
+        sch.addSectionHeader ("Colour schemes");
         for (int i = 0; i < (int) theme::schemes().size(); ++i) sch.addItem (950 + i, theme::schemes()[(size_t) i].name, true, cur == i);
         sch.addSeparator();
-        sch.addItem (990, "Custom colours...", true, cur >= (int) theme::schemes().size());
+        sch.addItem (990, "Custom colours...", true, cur == theme::kCustomScheme);
     }
     m.addSectionHeader ("Look");
-    m.addSubMenu ("Colour scheme", sch);
+    m.addSubMenu ("Theme", sch);
     {
         PopupMenu fm;
         const int cur = ana::get (st, ana::uiFont, theme::kDefaultFont);
@@ -332,7 +335,11 @@ void PotatoEQEditor::setScheme (int i)
 {
     auto& st = proc.apvts.state;
     st.setProperty (ana::scheme, i, nullptr);
-    st.setProperty (ana::palette, theme::schemes()[(size_t) i].palette, nullptr);   // matching analyzer colours (still changeable)
+    if (const auto* sc = theme::schemeAt (i))
+    {
+        st.setProperty (ana::palette, sc->palette, nullptr);   // matching analyzer colours (still changeable)
+        if (sc->backdrop >= 0) { st.setProperty (ana::backdrop, sc->backdrop, nullptr); theme::backdropMode() = sc->backdrop; }
+    }
     theme::applyScheme (i);
     lnf.refreshColours();
     backdropDirty = true;
@@ -366,12 +373,12 @@ public:
     SchemeDialog (ValueTree st, std::function<void()> changed) : state (st), onChanged (std::move (changed))
     {
         // start from whatever is on screen right now
-        const int cur = ana::get (state, ana::scheme, 0);
-        if (cur < (int) theme::schemes().size())
+        const int cur = ana::get (state, ana::scheme, theme::kDefaultScheme);
+        if (theme::schemeAt (cur) != nullptr)
         {
             const auto k = theme::slotsFromScheme (cur);
             for (int i = 0; i < theme::kCustomSlots; ++i) state.setProperty (ana::customSlot (i), (int64) k[(size_t) i].getARGB(), nullptr);
-            state.setProperty (ana::scheme, (int) theme::schemes().size(), nullptr);
+            state.setProperty (ana::scheme, theme::kCustomScheme, nullptr);
             onChanged();
         }
         for (int i = 0; i < theme::kCustomSlots; ++i)

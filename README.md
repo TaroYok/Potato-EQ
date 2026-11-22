@@ -19,7 +19,9 @@ Every push to `main` also builds the plugin; those builds are under **Actions �
 ## Features
 
 **Interface**
-- Frutiger Aero glass look: clear glass panels over a **sky and nature** scene, or a **colour void** (Display → Background)
+- Frutiger Aero glass look: clear glass panels over a scene. **Themes** (cog → Display → Theme) set colours, scene and analyzer
+  colours together: **Sky Aero** (default), **Ocean**, **Sunset Beach**, **Aurora Night**, **Meadow** and **Colour Void**.
+  The classic colour schemes are still there, and Display → Background swaps just the scene
 - The analyzer fills the window; the band editor floats over it while a band is selected
 - **Modules**: the loudness meter and the Auto EQ are modules. Add or remove them with **+** (top right); they sit in the dock
   at the bottom, and clicking one opens its glass sheet over the analyzer

@@ -557,7 +557,16 @@ int main (int argc, char** argv)
                 File sf = f.getSiblingFile (f.getFileNameWithoutExtension() + "-scheme" + String (sc) + ".png");
                 sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so);
             }
-        if (auto* pe = dynamic_cast<PotatoEQEditor*> (ed.get())) pe->setScheme (0);
+        if (auto* pe = dynamic_cast<PotatoEQEditor*> (ed.get()))
+            for (int th = theme::kFirstTheme; th < theme::numSchemeSlots(); ++th)
+            {
+                pe->setScheme (th);
+                for (int i = 0; i < 15; ++i) { run (*p, 0.03, pinkish); pump (25); }
+                auto im = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+                File sf = f.getSiblingFile (f.getFileNameWithoutExtension() + "-theme" + String (th - theme::kFirstTheme) + ".png");
+                sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so);
+            }
+        if (auto* pe = dynamic_cast<PotatoEQEditor*> (ed.get())) pe->setScheme (theme::kDefaultScheme);
         // meter units: LUFS and dB, with the limiter on so the GR meter shows
         p->setParam (params::id::limiter, 1.0f);
         for (int u = 0; u < 2; ++u)
@@ -586,13 +595,13 @@ int main (int argc, char** argv)
             auto& st = p->apvts.state;
             const uint32 custom[] = { 0xff2b2140, 0xff3a2f57, 0xff140f22, 0xffff8fb1, 0xff8fe3ff, 0xffb69cff, 0xfffff4fa, 0xff1b1030, 0xfff3e6ff };
             for (int i = 0; i < theme::kCustomSlots; ++i) st.setProperty (ana::customSlot (i), (int64) custom[i], nullptr);
-            st.setProperty (ana::scheme, (int) theme::schemes().size(), nullptr);
+            st.setProperty (ana::scheme, theme::kCustomScheme, nullptr);
             pe->refreshLook();
             for (int i = 0; i < 15; ++i) { run (*p, 0.03, pinkish); pump (25); }
             auto im = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
             File sf = f.getSiblingFile (f.getFileNameWithoutExtension() + "-custom-scheme.png");
             sf.deleteFile(); FileOutputStream so (sf); PNGImageFormat().writeImageToStream (im, so);
-            pe->setScheme (0);
+            pe->setScheme (theme::kDefaultScheme);
         }
         struct Look { int view, fill, palette; const char* name; };
         const Look looks[] = { { 0, 1, 0, "level-ipodblue" }, { 0, 2, 3, "heat-sunset" }, { 0, 3, 0, "slices-ipodblue" },

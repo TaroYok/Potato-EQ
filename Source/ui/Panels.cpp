@@ -854,7 +854,7 @@ void drawBubble (Graphics& g, Point<float> c, float r, Colour tint)
     g.fillEllipse (Rectangle<float> (r * 0.16f, r * 0.16f).withCentre ({ c.x + r * 0.5f, c.y + r * 0.5f }));
 }
 
-void drawCloud (Graphics& g, Point<float> c, float s)
+void drawCloud (Graphics& g, Point<float> c, float s, Colour top = Colours::white, Colour bottom = Colour (0xffcfe9ff))
 {
     const float puffs[][3] = { { 0, 0, 1.0f }, { -0.95f, 0.22f, 0.68f }, { 0.95f, 0.2f, 0.74f }, { -0.42f, -0.38f, 0.66f },
                                { 0.45f, -0.32f, 0.72f }, { -1.6f, 0.38f, 0.42f }, { 1.6f, 0.36f, 0.46f } };
@@ -863,7 +863,7 @@ void drawCloud (Graphics& g, Point<float> c, float s)
         cloud.addEllipse (Rectangle<float> (s * p[2] * 2.0f, s * p[2] * 1.7f).withCentre ({ c.x + s * p[0], c.y + s * p[1] }));
     g.setColour (Colour (0xff2a6fb8).withAlpha (0.12f));   // soft shadow
     g.fillPath (cloud, AffineTransform::translation (0, s * 0.18f));
-    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.97f), c.x, c.y - s, Colour (0xffcfe9ff).withAlpha (0.88f), c.x, c.y + s * 0.8f, false));
+    g.setGradientFill (ColourGradient (top.withAlpha (0.97f), c.x, c.y - s, bottom.withAlpha (0.88f), c.x, c.y + s * 0.8f, false));
     g.fillPath (cloud);
 }
 
@@ -920,6 +920,210 @@ void theme::paintScene (Graphics& g, Rectangle<float> b, int mode, bool simple)
             for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.10f, 0.80f, 34 }, { 0.92f, 0.70f, 26 }, { 0.62f, 0.12f, 18 }, { 0.30f, 0.15f, 12 } })
                 drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xff9be7ff));
         }
+        return;
+    }
+
+    auto glossyLayer = [&] (const Path& p, float topY, Colour top, Colour bottom, float rimAlpha)
+    {
+        g.setGradientFill (ColourGradient (top, 0, topY, bottom, 0, b.getBottom(), false));
+        g.fillPath (p);
+        g.setColour (Colours::white.withAlpha (rimAlpha));
+        g.strokePath (p, PathStrokeType (1.6f));
+        Graphics::ScopedSaveState ss (g);
+        g.reduceClipRegion (p);
+        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.26f), 0, topY, Colours::white.withAlpha (0.0f), 0, topY + h * 0.12f, false));
+        g.fillRect (b);
+    };
+    auto stars = [&] (int n, float maxY)
+    {
+        Random rng (777);
+        for (int i = 0; i < n; ++i)
+        {
+            const auto p = at (rng.nextFloat(), rng.nextFloat() * maxY);
+            const float sz = 0.6f + rng.nextFloat() * 1.7f;
+            g.setColour (Colours::white.withAlpha (0.2f + rng.nextFloat() * 0.7f));
+            g.fillEllipse (Rectangle<float> (sz, sz).withCentre (p));
+        }
+    };
+    auto shafts = [&] (Point<float> from, int n, float spread, float alpha)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const float a = MathConstants<float>::halfPi + spread * ((float) i / (float) jmax (1, n - 1) - 0.5f);
+            Path ray;
+            ray.startNewSubPath (from + Point<float> (-14.0f, 0));
+            ray.lineTo (from + Point<float> (14.0f, 0));
+            ray.lineTo (from + Point<float> (std::cos (a + 0.03f), std::sin (a + 0.03f)) * h * 1.2f);
+            ray.lineTo (from + Point<float> (std::cos (a - 0.03f), std::sin (a - 0.03f)) * h * 1.2f);
+            ray.closeSubPath();
+            g.setGradientFill (ColourGradient (Colours::white.withAlpha (alpha), from.x, from.y, Colours::white.withAlpha (0.0f), from.x, from.y + h * 0.9f, false));
+            g.fillPath (ray);
+        }
+    };
+
+    if (mode == 2)
+    {   // ocean: sunlit water, light shafts, a sandy floor with sea grass, and rising bubbles
+        ColourGradient sea (Colour (0xff46d2f0), 0, b.getY(), Colour (0xff021a33), 0, b.getBottom(), false);
+        sea.addColour (0.45, Colour (0xff0b67a0));
+        g.setGradientFill (sea); g.fillRect (b);
+        for (int k = 0; k < 4; ++k)
+        {   // ripples of light under the surface
+            Path rip;
+            const float y = b.getY() + h * (0.03f + 0.035f * (float) k);
+            rip.startNewSubPath (b.getX(), y);
+            for (int i = 1; i <= 12; ++i)
+                rip.quadraticTo (b.getX() + w * ((float) i - 0.5f) / 12.0f, y + ((i + k) % 2 == 0 ? 7.0f : -7.0f), b.getX() + w * (float) i / 12.0f, y);
+            g.setColour (Colours::white.withAlpha (0.22f - 0.04f * (float) k));
+            g.strokePath (rip, PathStrokeType (2.0f));
+        }
+        shafts (at (0.30f, -0.05f), 6, 0.9f, 0.10f);
+        shafts (at (0.75f, -0.05f), 5, 0.7f, 0.08f);
+        const auto floor = hill (b, 0.86f, { 0.04f, 0.07f, 0.03f, 0.06f });
+        glossyLayer (floor, b.getY() + h * 0.80f, Colour (0xffeed9a0), Colour (0xff9c7a3e), 0.4f);
+        if (simple) return;
+        Random rng (42);
+        for (int i = 0; i < 14; ++i)
+        {   // sea grass
+            const float x = b.getX() + w * rng.nextFloat(), base = b.getY() + h * (0.90f + 0.05f * rng.nextFloat());
+            const float len = h * (0.08f + 0.10f * rng.nextFloat()), sway = (rng.nextFloat() - 0.5f) * 40.0f;
+            Path blade;
+            blade.startNewSubPath (x, base);
+            blade.cubicTo (x + sway, base - len * 0.4f, x - sway, base - len * 0.7f, x + sway * 0.5f, base - len);
+            g.setColour (Colour (0xff2fbf6a).withAlpha (0.85f));
+            g.strokePath (blade, PathStrokeType (4.0f, PathStrokeType::curved, PathStrokeType::rounded));
+            g.setColour (Colour (0xffb6f24a).withAlpha (0.5f));
+            g.strokePath (blade, PathStrokeType (1.2f, PathStrokeType::curved, PathStrokeType::rounded));
+        }
+        for (int col = 0; col < 7; ++col)
+        {   // columns of rising bubbles
+            const float x = 0.06f + 0.14f * (float) col + 0.03f * rng.nextFloat();
+            for (int k = 0; k < 6; ++k)
+                drawBubble (g, at (x + 0.01f * std::sin ((float) k * 1.7f), 0.85f - 0.13f * (float) k - 0.05f * rng.nextFloat()), 3.0f + 3.0f * (float) k * rng.nextFloat(), Colour (0xffbff8ff));
+        }
+        for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.22f, 0.35f, 46 }, { 0.62f, 0.55f, 60 }, { 0.86f, 0.25f, 30 } })
+            drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xffbff8ff));
+        return;
+    }
+    if (mode == 3)
+    {   // sunset beach: violet-to-gold sky, a big low sun, glossy sea with its reflection, islands and sand
+        ColourGradient sky (Colour (0xff35196e), 0, b.getY(), Colour (0xffffc163), 0, b.getY() + h * 0.62f, false);
+        sky.addColour (0.55, Colour (0xffff5f8a));
+        g.setGradientFill (sky); g.fillRect (b);
+        const auto sun = at (0.5f, 0.50f);
+        g.setGradientFill (ColourGradient (Colour (0xfffff0a0).withAlpha (0.8f), sun.x, sun.y, Colour (0xffff8a3d).withAlpha (0.0f), sun.x + w * 0.45f, sun.y, true));
+        g.fillRect (b);
+        g.setGradientFill (ColourGradient (Colour (0xfffff6c8), sun.x, sun.y - w * 0.09f, Colour (0xffff8a3d), sun.x, sun.y + w * 0.09f, false));
+        g.fillEllipse (Rectangle<float> (w * 0.18f, w * 0.18f).withCentre (sun));
+        const float s = jmin (w, h);
+        drawCloud (g, at (0.20f, 0.22f), s * 0.06f, Colour (0xffffd6e6), Colour (0xffd06a9a));
+        drawCloud (g, at (0.78f, 0.15f), s * 0.05f, Colour (0xffffd6e6), Colour (0xffd06a9a));
+        const float horizon = b.getY() + h * 0.63f;
+        ColourGradient sea (Colour (0xffff9a7a), 0, horizon, Colour (0xff1a1450), 0, b.getBottom(), false);
+        sea.addColour (0.35, Colour (0xff6a3a9a));
+        g.setGradientFill (sea);
+        g.fillRect (b.withTop (horizon));
+        Random rng (9);
+        for (int i = 0; i < 26; ++i)
+        {   // sun glitter on the water
+            const float y = horizon + 4.0f + (h * 0.3f) * (float) i / 26.0f;
+            const float half = w * (0.02f + 0.10f * (float) i / 26.0f) * (0.5f + rng.nextFloat());
+            g.setColour (Colour (0xfffff0b0).withAlpha (0.55f - 0.015f * (float) i));
+            g.fillRoundedRectangle (Rectangle<float> (sun.x - half + (rng.nextFloat() - 0.5f) * 30.0f, y, half * 2.0f, 2.2f), 1.1f);
+        }
+        Path isle; isle.addEllipse (Rectangle<float> (w * 0.22f, h * 0.06f).withCentre (at (0.12f, 0.635f)));
+        isle.addEllipse (Rectangle<float> (w * 0.12f, h * 0.04f).withCentre (at (0.86f, 0.632f)));
+        { Graphics::ScopedSaveState ss (g); g.reduceClipRegion (Rectangle<int> ((int) b.getX(), (int) b.getY(), (int) w, (int) (horizon - b.getY()))); g.setColour (Colour (0xff3a1650)); g.fillPath (isle); }
+        const auto sand = hill (b, 0.90f, { 0.03f, 0.08f, 0.05f });
+        glossyLayer (sand, b.getY() + h * 0.84f, Colour (0xffffd9a0), Colour (0xffc07a4a), 0.45f);
+        if (simple) return;
+        for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.08f, 0.40f, 28 }, { 0.32f, 0.30f, 16 }, { 0.70f, 0.42f, 40 }, { 0.93f, 0.50f, 18 } })
+            drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xffffd0e8));
+        return;
+    }
+    if (mode == 4)
+    {   // aurora night: stars, ribbons of aurora, snowy mountains
+        ColourGradient sky (Colour (0xff020614), 0, b.getY(), Colour (0xff17357a), 0, b.getBottom(), false);
+        sky.addColour (0.6, Colour (0xff0b1d4a));
+        g.setGradientFill (sky); g.fillRect (b);
+        stars (simple ? 60 : 240, 0.75f);
+        struct Ribbon { float y, amp, phase, thick; Colour c; };
+        const Ribbon ribbons[] = { { 0.22f, 0.07f, 0.0f, 0.20f, Colour (0xff4dffb0) }, { 0.32f, 0.05f, 1.8f, 0.16f, Colour (0xff3fd8ff) },
+                                   { 0.16f, 0.06f, 3.1f, 0.12f, Colour (0xffc08cff) } };
+        for (auto& rb : ribbons)
+        {
+            Path band;
+            const int n = 24;
+            for (int i = 0; i <= n; ++i)
+            {
+                const float t = (float) i / (float) n;
+                const auto p = at (t, rb.y + rb.amp * std::sin (t * 6.0f + rb.phase));
+                if (i == 0) band.startNewSubPath (p); else band.lineTo (p);
+            }
+            for (int i = n; i >= 0; --i)
+            {
+                const float t = (float) i / (float) n;
+                band.lineTo (at (t, rb.y - rb.thick + rb.amp * 0.6f * std::sin (t * 6.0f + rb.phase + 0.6f)));
+            }
+            band.closeSubPath();
+            const float yb = b.getY() + h * rb.y;
+            ColourGradient glow (rb.c.withAlpha (0.0f), 0, yb - h * rb.thick, rb.c.withAlpha (0.0f), 0, yb + h * rb.amp, false);
+            glow.addColour (0.7, rb.c.withAlpha (0.5f));
+            g.setGradientFill (glow);
+            g.fillPath (band);
+        }
+        Path mtn;   // jagged mountains
+        mtn.startNewSubPath (b.getX(), b.getBottom());
+        const float peaks[] = { 0.80f, 0.62f, 0.74f, 0.55f, 0.70f, 0.60f, 0.78f, 0.66f, 0.82f };
+        for (int i = 0; i < 9; ++i) mtn.lineTo (at ((float) i / 8.0f, peaks[i]));
+        mtn.lineTo (b.getRight(), b.getBottom()); mtn.closeSubPath();
+        g.setGradientFill (ColourGradient (Colour (0xffeaf6ff), 0, b.getY() + h * 0.55f, Colour (0xff0c1a3e), 0, b.getY() + h * 0.80f, false));
+        g.fillPath (mtn);
+        g.setColour (Colours::white.withAlpha (0.4f)); g.strokePath (mtn, PathStrokeType (1.2f));
+        const auto snow = hill (b, 0.90f, { 0.03f, 0.05f, 0.02f, 0.04f });
+        glossyLayer (snow, b.getY() + h * 0.86f, Colour (0xffeaf6ff), Colour (0xff6f8fc8), 0.5f);
+        if (simple) return;
+        for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.10f, 0.50f, 26 }, { 0.55f, 0.45f, 38 }, { 0.88f, 0.40f, 20 } })
+            drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xffa8ffd8));
+        return;
+    }
+    if (mode == 5)
+    {   // meadow: bright sky, sunbeams, rolling hills with glossy round trees and flowers
+        ColourGradient sky (Colour (0xff2f9cf0), 0, b.getY(), Colour (0xfff0fff0), 0, b.getY() + h * 0.66f, false);
+        sky.addColour (0.5, Colour (0xff8fd8ff));
+        g.setGradientFill (sky); g.fillRect (b);
+        const auto sun = at (0.12f, 0.06f);
+        g.setGradientFill (ColourGradient (Colour (0xfffffbd0).withAlpha (0.95f), sun.x, sun.y, Colour (0xfffff2a0).withAlpha (0.0f), sun.x + w * 0.35f, sun.y, true));
+        g.fillRect (b);
+        shafts (sun, 8, 1.4f, 0.09f);
+        const float s = jmin (w, h);
+        drawCloud (g, at (0.45f, 0.16f), s * 0.06f);
+        drawCloud (g, at (0.80f, 0.26f), s * 0.07f);
+        const auto far = hill (b, 0.68f, { 0.05f, 0.09f, 0.04f, 0.08f, 0.05f });
+        glossyLayer (far, b.getY() + h * 0.60f, Colour (0xffb6ec7a), Colour (0xff4aa846), 0.35f);
+        if (! simple)
+        {   // glossy round trees on the far hills
+            Random rng (5);
+            for (int i = 0; i < 9; ++i)
+            {
+                const auto base = at (0.05f + 0.11f * (float) i + 0.03f * rng.nextFloat(), 0.66f + 0.03f * rng.nextFloat());
+                const float r = 12.0f + 10.0f * rng.nextFloat();
+                g.setColour (Colour (0xff6b4a2a)); g.fillRoundedRectangle (Rectangle<float> (base.x - 2.5f, base.y - r * 0.9f, 5.0f, r * 1.0f), 2.0f);
+                theme::drawOrb (g, { base.x, base.y - r * 1.4f }, r, Colour (0xff3fbf4a), true);
+            }
+        }
+        const auto near = hill (b, 0.82f, { 0.07f, 0.03f, 0.09f, 0.04f });
+        glossyLayer (near, b.getY() + h * 0.74f, Colour (0xff8fe84a), Colour (0xff1f7a2a), 0.4f);
+        if (simple) return;
+        Random fl (11);
+        for (int i = 0; i < 70; ++i)
+        {   // flowers
+            const auto p = at (fl.nextFloat(), 0.86f + 0.13f * fl.nextFloat());
+            const Colour c[] = { Colours::white, Colour (0xfffff07a), Colour (0xffffa8d8), Colour (0xffbfe6ff) };
+            g.setColour (c[i % 4].withAlpha (0.9f));
+            g.fillEllipse (Rectangle<float> (4.5f, 4.5f).withCentre (p));
+        }
+        for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.30f, 0.40f, 34 }, { 0.62f, 0.48f, 22 }, { 0.92f, 0.52f, 30 }, { 0.20f, 0.18f, 12 } })
+            drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xffc8f5ff));
         return;
     }
 

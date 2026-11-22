@@ -459,7 +459,7 @@ void EqDisplay::paint (Graphics& g)
     Path clip; clip.addRoundedRectangle (outer, theme::radius);
     g.reduceClipRegion (clip);
     // tinted glass: slightly see-through so the backdrop glows through, darker towards the bottom for readability
-    g.setGradientFill (ColourGradient (theme::plotBg.brighter (0.2f).withAlpha (0.52f), 0, outer.getY(), theme::plotBg.darker (0.3f).withAlpha (0.84f), 0, outer.getBottom(), false));
+    g.setGradientFill (ColourGradient (theme::plotBg.brighter (0.2f).withAlpha (0.40f), 0, outer.getY(), theme::plotBg.darker (0.3f).withAlpha (0.80f), 0, outer.getBottom(), false));
     g.fillRect (outer);
     const auto a = plotArea();
     const double fs = proc.getFs();
