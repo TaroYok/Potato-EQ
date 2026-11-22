@@ -32,17 +32,18 @@ void PotatoLookAndFeel::refreshColours()
     setColour (TooltipWindow::outlineColourId, theme::accent.withAlpha (0.4f));
 }
 
-// glossy pill used by buttons and combo boxes
+// glossy glass pill used by buttons and combo boxes: see-through body, curved gloss, accent glow on hover
 static void drawPill (Graphics& g, Rectangle<float> r, Colour base, bool over, bool down)
 {
     const float rad = jmin (r.getHeight() * 0.5f, 10.0f);
-    auto c = down ? base.brighter (0.25f) : over ? base.brighter (0.12f) : base;
-    g.setGradientFill (ColourGradient (c.brighter (0.25f), 0, r.getY(), c.darker (0.3f), 0, r.getBottom(), false));
+    auto c = down ? base.brighter (0.25f) : over ? base.brighter (0.15f) : base;
+    g.setGradientFill (ColourGradient (c.brighter (0.3f).withAlpha (0.85f), 0, r.getY(), c.darker (0.45f).withAlpha (0.92f), 0, r.getBottom(), false));
     g.fillRoundedRectangle (r, rad);
-    auto sheen = r.reduced (2.0f, 1.5f).removeFromTop (r.getHeight() * 0.48f);
-    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.28f), 0, sheen.getY(), Colours::white.withAlpha (0.04f), 0, sheen.getBottom(), false));
-    g.fillRoundedRectangle (sheen, rad - 1.5f);
-    g.setColour (Colours::white.withAlpha (over ? 0.32f : 0.2f));
+    auto glow = r.reduced (1.5f).removeFromBottom (r.getHeight() * 0.45f);
+    g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.0f), 0, glow.getY(), theme::accent.withAlpha (over ? 0.35f : 0.18f), 0, glow.getBottom(), false));
+    g.fillRoundedRectangle (glow, rad - 1.5f);
+    theme::drawAeroSheen (g, r.reduced (1.0f), rad - 1.0f, down ? 0.6f : 1.0f);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (over ? 0.55f : 0.38f), 0, r.getY(), theme::accent.withAlpha (over ? 0.6f : 0.25f), 0, r.getBottom(), false));
     g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
 }
 
@@ -54,13 +55,19 @@ void PotatoLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int 
     const float ang = start + pos * (end - start);
     const auto col = s.isEnabled() ? s.findColour (Slider::rotarySliderFillColourId) : theme::textDim.withAlpha (0.5f);
 
+    // glass bezel behind the ring
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.10f), c.x, c.y - r, Colours::black.withAlpha (0.30f), c.x, c.y + r, false));
+    g.fillEllipse (Rectangle<float> (2 * r + 2, 2 * r + 2).withCentre (c));
+    g.setColour (Colours::white.withAlpha (0.14f)); g.drawEllipse (Rectangle<float> (2 * r + 2, 2 * r + 2).withCentre (c), 0.8f);
     Path track; track.addCentredArc (c.x, c.y, r - 2, r - 2, 0, start, end, true);
-    g.setColour (Colours::black.withAlpha (0.35f)); g.strokePath (track, PathStrokeType (4.0f, PathStrokeType::curved, PathStrokeType::rounded));
+    g.setColour (Colours::black.withAlpha (0.45f)); g.strokePath (track, PathStrokeType (4.5f, PathStrokeType::curved, PathStrokeType::rounded));
     const bool bipolar = s.getMinimum() < 0 && s.getMaximum() > 0;
     const float from = bipolar ? (start + end) / 2 : start;
     Path val; val.addCentredArc (c.x, c.y, r - 2, r - 2, 0, jmin (from, ang), jmax (from, ang), true);
-    g.setColour (col.withAlpha (0.35f)); g.strokePath (val, PathStrokeType (8.0f, PathStrokeType::curved, PathStrokeType::rounded));   // glow
+    g.setColour (col.withAlpha (0.18f)); g.strokePath (val, PathStrokeType (12.0f, PathStrokeType::curved, PathStrokeType::rounded));   // soft glow
+    g.setColour (col.withAlpha (0.38f)); g.strokePath (val, PathStrokeType (7.0f, PathStrokeType::curved, PathStrokeType::rounded));
     g.setColour (col); g.strokePath (val, PathStrokeType (3.5f, PathStrokeType::curved, PathStrokeType::rounded));
+    g.setColour (Colours::white.withAlpha (0.55f)); g.strokePath (val, PathStrokeType (1.0f, PathStrokeType::curved, PathStrokeType::rounded));   // hot core
     theme::drawOrb (g, c, r - 7, theme::chrome.darker (0.15f));   // chrome knob cap
     g.setColour (Colours::black.withAlpha (s.isEnabled() ? 0.75f : 0.3f));
     g.drawLine (Line<float> (c.getPointOnCircumference ((r - 7) * 0.3f, ang), c.getPointOnCircumference (r - 10, ang)), 2.2f);
@@ -69,11 +76,16 @@ void PotatoLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int 
 void PotatoLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, float pos, float, float, Slider::SliderStyle, Slider& s)
 {
     const auto b = Rectangle<int> (x, y, w, h).toFloat();
-    const auto track = b.withSizeKeepingCentre (b.getWidth(), 6.0f);
-    g.setColour (Colours::black.withAlpha (0.35f)); g.fillRoundedRectangle (track, 3);
+    const auto track = b.withSizeKeepingCentre (b.getWidth(), 7.0f);
+    g.setColour (Colours::black.withAlpha (0.45f)); g.fillRoundedRectangle (track, 3.5f);
+    g.setColour (Colours::white.withAlpha (0.12f)); g.drawRoundedRectangle (track.translated (0, 0.5f), 3.5f, 0.7f);
     const auto col = s.findColour (Slider::trackColourId);
-    g.setGradientFill (ColourGradient (col.brighter (0.3f), 0, track.getY(), col.darker (0.2f), 0, track.getBottom(), false));
-    g.fillRoundedRectangle (track.withRight (pos), 3);
+    const auto fill = track.withRight (pos);
+    g.setColour (col.withAlpha (0.25f)); g.fillRoundedRectangle (fill.expanded (0, 2.5f), 5.0f);   // glow
+    g.setGradientFill (ColourGradient (col.brighter (0.45f), 0, track.getY(), col.darker (0.25f), 0, track.getBottom(), false));
+    g.fillRoundedRectangle (fill, 3.5f);
+    g.setColour (Colours::white.withAlpha (0.45f));   // glass tube highlight
+    g.fillRoundedRectangle (fill.reduced (2.0f, 0).withHeight (2.0f).translated (0, 1.0f), 1.0f);
     theme::drawOrb (g, { pos, b.getCentreY() }, 7.5f, Colour (0xffdff3ff));
 }
 
@@ -100,9 +112,14 @@ void PotatoLookAndFeel::positionComboBoxText (ComboBox& box, Label& label)
 
 void PotatoLookAndFeel::drawPopupMenuBackground (Graphics& g, int w, int h)
 {
-    g.fillAll (theme::panel.darker (0.35f));
-    g.setColour (Colours::white.withAlpha (0.12f));
-    g.drawRect (0, 0, w, h, 1);
+    const auto r = Rectangle<float> (0, 0, (float) w, (float) h);
+    g.setGradientFill (ColourGradient (theme::panel.darker (0.1f), 0, 0, theme::panel.darker (0.5f), 0, r.getBottom(), false));
+    g.fillAll();
+    auto top = r.withHeight (jmin (40.0f, r.getHeight() * 0.3f));
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.12f), 0, 0, Colours::white.withAlpha (0.0f), 0, top.getBottom(), false));
+    g.fillRect (top);
+    g.setColour (theme::accent.withAlpha (0.35f));
+    g.drawRect (r, 1.0f);
 }
 
 void PotatoLookAndFeel::drawToggleButton (Graphics& g, ToggleButton& b, bool over, bool)
@@ -811,10 +828,11 @@ void theme::setUiFont (int index)
         { BinaryData::InterRegular_ttf, BinaryData::InterRegular_ttfSize, BinaryData::InterBold_ttf, BinaryData::InterBold_ttfSize },
         { BinaryData::DMSansRegular_ttf, BinaryData::DMSansRegular_ttfSize, BinaryData::DMSansBold_ttf, BinaryData::DMSansBold_ttfSize },
         { BinaryData::ManropeRegular_ttf, BinaryData::ManropeRegular_ttfSize, BinaryData::ManropeBold_ttf, BinaryData::ManropeBold_ttfSize },
-        { BinaryData::QuicksandRegular_ttf, BinaryData::QuicksandRegular_ttfSize, BinaryData::QuicksandBold_ttf, BinaryData::QuicksandBold_ttfSize } };
+        { BinaryData::QuicksandRegular_ttf, BinaryData::QuicksandRegular_ttfSize, BinaryData::QuicksandBold_ttf, BinaryData::QuicksandBold_ttfSize },
+        { BinaryData::InterDisplayMedium_otf, BinaryData::InterDisplayMedium_otfSize, BinaryData::InterDisplayBold_otf, BinaryData::InterDisplayBold_otfSize } };
     const auto& f = fonts[jlimit (0, (int) std::size (fonts) - 1, index)];
     uiRegular() = f.r != nullptr ? Typeface::createSystemTypefaceFor (f.r, (size_t) f.rn) : nullptr;
     uiBold() = f.b != nullptr ? Typeface::createSystemTypefaceFor (f.b, (size_t) f.bn) : nullptr;
-    const float scales[] = { 1.0f, 1.16f, 1.06f, 1.14f, 1.10f, 1.16f };   // match the classic font's visual size
+    const float scales[] = { 1.0f, 1.16f, 1.06f, 1.14f, 1.10f, 1.16f, 1.07f };   // match the classic font's visual size
     uiFontScale() = scales[jlimit (0, (int) std::size (scales) - 1, index)];
 }

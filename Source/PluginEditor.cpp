@@ -9,7 +9,7 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
 {
     theme::applySchemeFromState (proc.apvts.state);
     ++theme::openEditors();
-    theme::setUiFont (ana::get (proc.apvts.state, ana::uiFont, 4));
+    theme::setUiFont (ana::get (proc.apvts.state, ana::uiFont, theme::kDefaultFont));
     lnf.refreshColours();
     setLookAndFeel (&lnf);
     auto& s = proc.apvts;
@@ -117,7 +117,7 @@ void PotatoEQEditor::showAnalyzerMenu()
     m.addSubMenu ("Colour scheme", sch);
     {
         PopupMenu fm;
-        const int cur = ana::get (st, ana::uiFont, 4);
+        const int cur = ana::get (st, ana::uiFont, theme::kDefaultFont);
         for (int i = 0; i < theme::fontNames.size(); ++i) fm.addItem (1100 + i, theme::fontNames[i], true, cur == i);
         m.addSubMenu ("Font", fm);
     }
@@ -256,6 +256,7 @@ void PotatoEQEditor::refreshLook()
 {
     theme::applySchemeFromState (proc.apvts.state);
     lnf.refreshColours();
+    backdropDirty = true;
     sendLookAndFeelChange();
     repaint();
 }
@@ -264,6 +265,7 @@ void PotatoEQEditor::setUiFont (int i)
 {
     proc.apvts.state.setProperty (ana::uiFont, i, nullptr);
     theme::setUiFont (i);
+    backdropDirty = true;   // the logo is part of the cached backdrop
     sendLookAndFeelChange();
     resized();
     repaint();
@@ -346,46 +348,103 @@ void PotatoEQEditor::showColourDialog()
 
 void PotatoEQEditor::paint (Graphics& g)
 {
+    // The backdrop is costly (gradients, bubbles) and shows through the see-through panels, so the
+    // analyzer's frequent repaints would redraw it every frame: render it once into an image instead.
+    const float sc = jmax (1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    const int w = roundToInt ((float) getWidth() * sc), h = roundToInt ((float) getHeight() * sc);
+    // rebuild when the size or anything the backdrop uses changes (scheme, custom colours, font)
+    const auto key = String::toHexString ((int64) theme::bgTop.getARGB()) + String::toHexString ((int64) theme::bgBottom.getARGB())
+                   + String::toHexString ((int64) theme::navTop.getARGB()) + String::toHexString ((int64) theme::navBottom.getARGB())
+                   + String::toHexString ((int64) theme::accent.getARGB()) + String::toHexString ((int64) theme::accent2.getARGB())
+                   + String::toHexString ((int64) theme::navText.getARGB()) + String (theme::uiFontScale());
+    if (backdropDirty || key != backdropKey || backdrop.getWidth() != w || backdrop.getHeight() != h)
+    {
+        backdropKey = key;
+        backdrop = Image (Image::ARGB, jmax (1, w), jmax (1, h), true);
+        Graphics ig (backdrop);
+        ig.addTransform (AffineTransform::scale (sc));
+        paintBackdrop (ig);
+        backdropDirty = false;
+    }
+    g.drawImage (backdrop, getLocalBounds().toFloat());
+}
+
+void PotatoEQEditor::paintBackdrop (Graphics& g)
+{
     auto b = getLocalBounds().toFloat();
-    // glossy black glass with a diagonal reflection, like the face of an iPod touch
+    // Dark Aero backdrop: deep glass with auroras, light rays, reflections and drifting bubbles.
+    // The panels are see-through, so all of this glows through them.
     g.setGradientFill (ColourGradient (theme::bgTop, 0, 0, theme::bgBottom, 0, b.getBottom(), false));
     g.fillAll();
-    Path refl;
-    refl.startNewSubPath (0, 0); refl.lineTo (b.getWidth() * 0.62f, 0); refl.lineTo (b.getWidth() * 0.30f, b.getHeight()); refl.lineTo (0, b.getHeight()); refl.closeSubPath();
-    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.045f), 0, 0, Colours::white.withAlpha (0.0f), b.getWidth() * 0.45f, b.getHeight() * 0.6f, false));
-    g.fillPath (refl);
+    auto aurora = [&] (Colour c, float alpha, float cx, float cy, float radius)
+    {
+        g.setGradientFill (ColourGradient (c.withAlpha (alpha), b.getWidth() * cx, b.getHeight() * cy,
+                                           c.withAlpha (0.0f), b.getWidth() * cx + b.getWidth() * radius, b.getHeight() * cy, true));
+        g.fillRect (b);
+    };
+    aurora (theme::navTop, 0.30f, 0.82f, 0.02f, 0.55f);     // violet sky glow, top right
+    aurora (theme::accent, 0.30f, 0.05f, 1.00f, 0.60f);     // aqua water glow, bottom left
+    aurora (theme::accent2, 0.13f, 0.98f, 0.98f, 0.40f);    // lime, bottom right
+    aurora (theme::accent, 0.10f, 0.45f, 0.45f, 0.35f);     // soft centre lift
 
-    // Aero atmosphere: a soft accent aurora and a few glossy bubbles drifting behind the panels
-    g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.16f), b.getWidth() * 0.15f, b.getBottom(),
-                                       theme::accent.withAlpha (0.0f), b.getWidth() * 0.55f, b.getHeight() * 0.35f, true));
-    g.fillRect (b);
-    g.setGradientFill (ColourGradient (theme::accent2.withAlpha (0.08f), b.getRight(), b.getY(),
-                                       theme::accent2.withAlpha (0.0f), b.getWidth() * 0.6f, b.getHeight() * 0.5f, true));
-    g.fillRect (b);
-    const float bubbles[][3] = { { 0.06f, 0.92f, 26 }, { 0.13f, 0.80f, 11 }, { 0.47f, 0.96f, 18 }, { 0.71f, 0.90f, 9 },
-                                 { 0.96f, 0.55f, 22 }, { 0.90f, 0.08f, 13 }, { 0.36f, 0.06f, 8 } };
+    // sun rays fanning down from the top left
+    for (int i = 0; i < 5; ++i)
+    {
+        const float x0 = b.getWidth() * (0.02f + 0.07f * (float) i), spread = b.getWidth() * (0.10f + 0.05f * (float) i);
+        Path ray;
+        ray.startNewSubPath (x0, 0); ray.lineTo (x0 + 22.0f, 0);
+        ray.lineTo (x0 + spread + 110.0f, b.getHeight()); ray.lineTo (x0 + spread, b.getHeight()); ray.closeSubPath();
+        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.055f), 0, 0, Colours::white.withAlpha (0.0f), 0, b.getHeight() * 0.85f, false));
+        g.fillPath (ray);
+    }
+
+    // two glossy diagonal reflections across the whole glass
+    auto streak = [&] (float x0, float w, float alpha)
+    {
+        Path p;
+        p.startNewSubPath (b.getWidth() * x0, 0); p.lineTo (b.getWidth() * (x0 + w), 0);
+        p.lineTo (b.getWidth() * (x0 + w - 0.28f), b.getHeight()); p.lineTo (b.getWidth() * (x0 - 0.28f), b.getHeight()); p.closeSubPath();
+        g.setGradientFill (ColourGradient (Colours::white.withAlpha (alpha), b.getWidth() * x0, 0, Colours::white.withAlpha (0.0f), b.getWidth() * (x0 - 0.2f), b.getHeight(), false));
+        g.fillPath (p);
+    };
+    streak (0.55f, 0.16f, 0.07f);
+    streak (0.76f, 0.04f, 0.06f);
+
+    // bubbles: x, y (fractions of the window), radius
+    const float bubbles[][3] = { { 0.05f, 0.93f, 30 }, { 0.12f, 0.80f, 12 }, { 0.20f, 0.97f, 8 }, { 0.30f, 0.62f, 54 },
+                                 { 0.47f, 0.96f, 20 }, { 0.58f, 0.30f, 70 }, { 0.71f, 0.90f, 10 }, { 0.66f, 0.70f, 34 },
+                                 { 0.83f, 0.58f, 46 }, { 0.96f, 0.52f, 24 }, { 0.90f, 0.08f, 14 }, { 0.36f, 0.06f, 9 },
+                                 { 0.15f, 0.25f, 40 }, { 0.995f, 0.86f, 16 }, { 0.43f, 0.80f, 6 }, { 0.78f, 0.18f, 8 } };
     for (auto& bb : bubbles)
     {
         const Point<float> c (b.getWidth() * bb[0], b.getHeight() * bb[1]);
         const float r = bb[2];
         auto body = Rectangle<float> (2 * r, 2 * r).withCentre (c);
-        g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.0f), c.x, c.y, theme::accent.withAlpha (0.22f), c.x + r, c.y, true));
+        g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.02f), c.x, c.y, theme::accent.withAlpha (0.28f), c.x + r, c.y, true));
         g.fillEllipse (body);
-        g.setColour (Colours::white.withAlpha (0.25f)); g.drawEllipse (body, 1.0f);
-        auto hl = Rectangle<float> (r * 0.9f, r * 0.5f).withCentre ({ c.x - r * 0.25f, c.y - r * 0.5f });
-        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.55f), hl.getCentreX(), hl.getY(), Colours::white.withAlpha (0.0f), hl.getCentreX(), hl.getBottom(), false));
+        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.45f), c.x, c.y - r, theme::accent.withAlpha (0.25f), c.x, c.y + r, false));
+        g.drawEllipse (body, r > 20 ? 1.4f : 1.0f);
+        auto hl = Rectangle<float> (r * 0.95f, r * 0.55f).withCentre ({ c.x - r * 0.22f, c.y - r * 0.48f });
+        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.65f), hl.getCentreX(), hl.getY(), Colours::white.withAlpha (0.0f), hl.getCentreX(), hl.getBottom(), false));
         g.fillEllipse (hl);
+        g.setColour (Colours::white.withAlpha (0.5f));   // little glint at the bottom right
+        g.fillEllipse (Rectangle<float> (r * 0.16f, r * 0.16f).withCentre ({ c.x + r * 0.5f, c.y + r * 0.5f }));
     }
 
-    // iPhone OS style navigation bar: slate-blue gloss, chrome edge
+    // glossy glass title bar
     auto head = b.removeFromTop (44.0f).reduced (6.0f, 4.0f);
-    g.setGradientFill (ColourGradient (theme::navTop, 0, head.getY(), theme::navBottom, 0, head.getBottom(), false));
+    g.setGradientFill (ColourGradient (theme::navTop.withAlpha (0.88f), 0, head.getY(), theme::navBottom.withAlpha (0.92f), 0, head.getBottom(), false));
     g.fillRoundedRectangle (head, theme::radius);
-    auto gloss = head.withHeight (head.getHeight() * 0.5f);
-    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.45f), 0, gloss.getY(), Colours::white.withAlpha (0.10f), 0, gloss.getBottom(), false));
-    g.fillRoundedRectangle (gloss, theme::radius);
-    g.setColour (Colours::black.withAlpha (0.45f));
-    g.drawRoundedRectangle (head, theme::radius, 1.0f);
+    auto under = head.reduced (2.0f).removeFromBottom (head.getHeight() * 0.4f);
+    g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.0f), 0, under.getY(), theme::accent.withAlpha (0.45f), 0, under.getBottom(), false));
+    g.fillRoundedRectangle (under, theme::radius - 2.0f);
+    theme::drawAeroSheen (g, head.reduced (1.0f), theme::radius - 1.0f, 1.25f);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.7f), 0, head.getY(), theme::accent.withAlpha (0.6f), 0, head.getBottom(), false));
+    g.drawRoundedRectangle (head.reduced (0.5f), theme::radius, 1.2f);
+
+    // thin glass rim around the whole window
+    g.setColour (Colours::white.withAlpha (0.10f));
+    g.drawRect (getLocalBounds().toFloat(), 1.0f);
 
     // engraved logo
     auto top = getLocalBounds().removeFromTop (44).reduced (16, 0);
@@ -397,7 +456,11 @@ void PotatoEQEditor::paint (Graphics& g)
     g.setColour (theme::navText);
     g.drawText ("POTATO", logo.withWidth (84), Justification::centredLeft);
     g.setFont (theme::font (21.0f));
-    g.setColour (theme::navText.withAlpha (0.85f));
+    const auto eqCol = theme::accent.brighter (0.5f);
+    g.setColour (eqCol.withAlpha (0.35f));   // soft glow behind "EQ"
+    for (auto d : { Point<int> (-1, 0), Point<int> (1, 0), Point<int> (0, -1), Point<int> (0, 1) })
+        g.drawText ("EQ", logo.withTrimmedLeft (84).translated (d.x, d.y), Justification::centredLeft);
+    g.setColour (eqCol);
     g.drawText ("EQ", logo.withTrimmedLeft (84), Justification::centredLeft);
 }
 

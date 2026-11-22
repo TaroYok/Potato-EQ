@@ -458,7 +458,10 @@ void EqDisplay::paint (Graphics& g)
     const auto outer = getLocalBounds().toFloat();
     Path clip; clip.addRoundedRectangle (outer, theme::radius);
     g.reduceClipRegion (clip);
-    g.setGradientFill (ColourGradient (theme::plotBg.brighter (0.25f), 0, outer.getY(), theme::plotBg.darker (0.3f), 0, outer.getBottom(), false));
+    // tinted glass: slightly see-through so the backdrop glows through, darker towards the bottom for readability
+    g.setGradientFill (ColourGradient (theme::plotBg.brighter (0.35f).withAlpha (0.84f), 0, outer.getY(), theme::plotBg.darker (0.3f).withAlpha (0.94f), 0, outer.getBottom(), false));
+    g.fillRect (outer);
+    g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.07f), outer.getX(), outer.getBottom(), theme::accent.withAlpha (0.0f), outer.getCentreX(), outer.getCentreY(), true));
     g.fillRect (outer);
     const auto a = plotArea();
     const double fs = proc.getFs();
@@ -816,6 +819,10 @@ void EqDisplay::paint (Graphics& g)
         g.setColour (theme::accent.withAlpha (0.7f)); g.drawRoundedRectangle (box, 6, 1);
         g.setColour (theme::text); g.drawText (message, box, Justification::centred);
     }
+    // glass front: a faint curved reflection and a chrome rim over the whole plot
+    theme::drawAeroSheen (g, outer.reduced (1.0f), theme::radius - 1.0f, 0.22f);
+    g.setGradientFill (ColourGradient (theme::chrome.withAlpha (0.55f), 0, outer.getY(), theme::accent.withAlpha (0.3f), 0, outer.getBottom(), false));
+    g.drawRoundedRectangle (outer.reduced (0.6f), theme::radius, 1.2f);
     String status;
     if (linear) status << "Linear phase  (latency " << roundToInt (1000.0 * proc.getLatencySamples() / jmax (1.0, fs)) << " ms, dynamic bands act static)    ";
     if (proc.spectralActive())

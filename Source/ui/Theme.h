@@ -1,8 +1,8 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 
-// Look: Frutiger Aero / iPod touch era, modernised - glossy black glass, chrome rims,
-// slate-blue navigation bar, iPhone OS blue accents, glossy orbs for knobs and nodes.
+// Look: Frutiger Aero, modernised - see-through glass panels with curved gloss, chrome rims,
+// glossy title bar, aqua/lime accents, glossy orbs for knobs and nodes. Default scheme: Dark Aero.
 namespace theme
 {
 using juce::Colour;
@@ -50,7 +50,9 @@ inline juce::Typeface::Ptr& uiBold()    { static juce::Typeface::Ptr p; return p
 inline int& openEditors()               { static int n = 0; return n; }
 inline float& uiFontScale()             { static float k = 1.0f; return k; }   // evens out each font's built-in spacing
 inline const juce::StringArray fontNames { "Classic (system)", "Nunito (soft, rounded)", "Inter (clean, very readable)",
-                                           "DM Sans (soft geometric)", "Manrope (modern)", "Quicksand (softest)" };
+                                           "DM Sans (soft geometric)", "Manrope (modern)", "Quicksand (softest)",
+                                           "Inter Display (crisp, modern)" };
+constexpr int kDefaultFont = 6;
 void setUiFont (int index);   // Panels.cpp (needs the embedded font data)
 
 inline juce::Font font (float h, bool bold = false)
@@ -62,21 +64,39 @@ inline juce::Font font (float h, bool bold = false)
 // same size and weight, in the chosen interface font
 inline juce::Font withFace (const juce::Font& f) { return font (f.getHeight(), f.isBold()); }
 
-// Rounded glass panel: translucent body, soft top sheen, thin bright rim.
+// Classic Aero gloss: a bright reflection over the top part of a shape whose lower edge curves
+// down like light on a glass bubble, plus a crisp 1 px highlight just inside the top edge.
+inline void drawAeroSheen (juce::Graphics& g, juce::Rectangle<float> r, float rad, float strength = 1.0f)
+{
+    juce::Graphics::ScopedSaveState ss (g);
+    juce::Path clip; clip.addRoundedRectangle (r, rad);
+    g.reduceClipRegion (clip);
+    const float h = juce::jmin (r.getHeight() * 0.52f, 46.0f);
+    juce::Path arc;
+    arc.addEllipse (r.getX() - r.getWidth() * 0.35f, r.getY() - h * 1.9f, r.getWidth() * 1.7f, h * 2.9f);
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.34f * strength), 0, r.getY(),
+                                             juce::Colours::white.withAlpha (0.05f * strength), 0, r.getY() + h, false));
+    g.fillPath (arc);
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.0f), r.getX(), 0, juce::Colours::white.withAlpha (0.55f * strength), r.getCentreX(), 0, false));
+    g.drawHorizontalLine ((int) r.getY() + 1, r.getX() + rad * 0.6f, r.getRight() - rad * 0.6f);
+}
+
+// Rounded glass panel: see-through tinted body (the background glows through), curved Aero gloss,
+// accent light pooling at the bottom, and a chrome rim that picks up the accent colour.
 inline void drawGlassPanel (juce::Graphics& g, juce::Rectangle<float> r, float rad = radius, Colour tint = panel)
 {
-    g.setGradientFill (juce::ColourGradient (tint.brighter (0.18f).withAlpha (0.92f), 0, r.getY(), tint.darker (0.35f).withAlpha (0.92f), 0, r.getBottom(), false));
+    g.setGradientFill (juce::ColourGradient (tint.brighter (0.25f).withAlpha (0.62f), 0, r.getY(), tint.darker (0.45f).withAlpha (0.80f), 0, r.getBottom(), false));
     g.fillRoundedRectangle (r, rad);
-    auto sheen = r.reduced (2.0f).removeFromTop (juce::jmin (40.0f, r.getHeight() * 0.5f));
-    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.22f), 0, sheen.getY(), juce::Colours::white.withAlpha (0.0f), 0, sheen.getBottom(), false));
-    g.fillRoundedRectangle (sheen, rad - 2.0f);
-    // soft accent glow along the bottom edge (Aero light bounce)
-    auto glow = r.reduced (2.0f).removeFromBottom (juce::jmin (28.0f, r.getHeight() * 0.3f));
-    g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.0f), 0, glow.getY(), accent.withAlpha (0.10f), 0, glow.getBottom(), false));
+    // light pooling at the bottom edge
+    auto glow = r.reduced (2.0f).removeFromBottom (juce::jmin (60.0f, r.getHeight() * 0.4f));
+    g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.0f), 0, glow.getY(), accent.withAlpha (0.16f), 0, glow.getBottom(), false));
     g.fillRoundedRectangle (glow, rad - 2.0f);
-    // chrome rim: brighter on top, darker at the bottom
-    g.setGradientFill (juce::ColourGradient (chrome.withAlpha (0.55f), 0, r.getY(), chrome.withAlpha (0.12f), 0, r.getBottom(), false));
-    g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.2f);
+    drawAeroSheen (g, r.reduced (1.5f), rad - 1.5f, 0.75f);
+    // rim: bright chrome on top fading to an accent tint at the bottom
+    g.setGradientFill (juce::ColourGradient (chrome.withAlpha (0.75f), 0, r.getY(), accent.withAlpha (0.35f), 0, r.getBottom(), false));
+    g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.3f);
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.drawRoundedRectangle (r.reduced (1.8f), rad - 1.3f, 0.8f);
 }
 
 // Glossy orb (knob caps, band nodes, toggle bubbles).

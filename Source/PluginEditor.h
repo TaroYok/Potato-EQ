@@ -14,6 +14,10 @@ public:
     void setUiFont (int);   // interface font
     void refreshLook();     // re-apply colours after a change
 private:
+    void paintBackdrop (juce::Graphics&);   // glass backdrop + title bar, cached in backdrop
+    juce::Image backdrop;
+    bool backdropDirty = true;
+    juce::String backdropKey;
     PotatoEQProcessor& proc;
     PotatoLookAndFeel lnf;
     juce::TooltipWindow tooltips { this, 600 };
