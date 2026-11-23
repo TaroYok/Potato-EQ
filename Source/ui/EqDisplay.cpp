@@ -458,7 +458,8 @@ void EqDisplay::paint (Graphics& g)
     const auto outer = getLocalBounds().toFloat();
     Path clip; clip.addRoundedRectangle (outer, theme::radius);
     g.reduceClipRegion (clip);
-    g.setGradientFill (ColourGradient (theme::plotBg.brighter (0.25f), 0, outer.getY(), theme::plotBg.darker (0.3f), 0, outer.getBottom(), false));
+    // tinted glass: slightly see-through so the backdrop glows through, darker towards the bottom for readability
+    g.setGradientFill (ColourGradient (theme::plotBg.brighter (0.2f).withAlpha (0.40f), 0, outer.getY(), theme::plotBg.darker (0.3f).withAlpha (0.80f), 0, outer.getBottom(), false));
     g.fillRect (outer);
     const auto a = plotArea();
     const double fs = proc.getFs();
@@ -743,7 +744,7 @@ void EqDisplay::paint (Graphics& g)
         if (! s.used) continue;
         const auto pos = nodePosition (s);
         const auto c = theme::bandColour (b);
-        const float r = (b == selected || b == hovered) ? 8.5f : 7.0f;
+        const float r = (b == selected || b == hovered) ? 10.5f : 9.0f;
         if (s.dynamic && arc::typeSupportsDynamic (s.type) && (! linear || s.isSpectral()))
         {   // line + ring show where the dynamic range can take the band
             g.setColour (c.withAlpha (0.35f));
@@ -751,16 +752,20 @@ void EqDisplay::paint (Graphics& g)
             g.drawLine (pos.x, pos.y, pos.x, jlimit (a.getY(), a.getBottom(), yr), 2.0f);
             g.drawEllipse (Rectangle<float> (r * 2.4f, r * 2.4f).withCentre ({ pos.x, yr }), 1.2f);
         }
+        // flat, modern node: a solid dot with a crisp outline, a clean ring when selected, the band number on top
+        const auto dot = Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (pos);
         if (b == selected)
-        {   // soft halo around the selected band
-            g.setGradientFill (ColourGradient (c.withAlpha (0.45f), pos.x, pos.y, c.withAlpha (0.0f), pos.x + r * 2.6f, pos.y, true));
-            g.fillEllipse (Rectangle<float> (r * 5.2f, r * 5.2f).withCentre (pos));
+        {
+            g.setColour (Colours::white);
+            g.drawEllipse (dot.expanded (3.5f), 2.0f);
         }
-        theme::drawOrb (g, pos, r, s.bypass ? theme::panelHi : c, b == selected || b == hovered);
-        if (b == selected) { g.setColour (Colours::white.withAlpha (0.9f)); g.drawEllipse (Rectangle<float> (r * 2 + 3, r * 2 + 3).withCentre (pos), 1.5f); }
-        g.setColour (s.bypass ? theme::textDim : Colours::black.withAlpha (0.8f));
-        g.setFont (theme::font (10.0f, true));
-        g.drawText (String (b + 1), Rectangle<float> (r * 2, r * 2).withCentre (pos), Justification::centred);
+        g.setColour (s.bypass ? theme::panelHi : c);
+        g.fillEllipse (dot);
+        g.setColour (s.bypass ? c : Colours::black.withAlpha (0.35f));
+        g.drawEllipse (dot, s.bypass ? 1.5f : 1.0f);
+        g.setColour (s.bypass ? theme::textDim : Colour (0xff10131a));
+        g.setFont (theme::font (b >= 9 ? 10.0f : 11.0f, true));
+        g.drawText (String (b + 1), dot.translated (0, 0.5f), Justification::centred, false);
     }
 
     auto tag = [&] (Point<float> at, const String& t, Colour border)
@@ -807,13 +812,6 @@ void EqDisplay::paint (Graphics& g)
         g.drawText (t, a.reduced (6, 4).removeFromBottom (14), Justification::bottomRight);
     }
 
-    if (std::none_of (bands.begin(), bands.end(), [] (auto& s) { return s.used; }))
-    {
-        g.setColour (theme::textDim);
-        g.setFont (theme::font (14.0f));
-        g.drawText ("Double-click to add a band, or drag a peak in the analyzer.  Scroll = Q, right-click = options, Alt-click = delete.",
-                    a.withTrimmedTop (a.getHeight() * 0.62f).withHeight (24), Justification::centred);
-    }
     if (message.isNotEmpty() && Time::getMillisecondCounter() < messageUntil)
     {
         g.setFont (theme::font (13.0f));
@@ -823,6 +821,15 @@ void EqDisplay::paint (Graphics& g)
         g.setColour (theme::accent.withAlpha (0.7f)); g.drawRoundedRectangle (box, 6, 1);
         g.setColour (theme::text); g.drawText (message, box, Justification::centred);
     }
+    // glass front: a faint curved reflection and a chrome rim over the whole plot
+    theme::drawAeroSheen (g, outer.reduced (2.5f), theme::radius - 2.5f, 0.35f);
+    // thick bevelled glass edge, as on every other slab
+    g.setColour (Colours::black.withAlpha (0.45f));
+    g.drawRoundedRectangle (outer.reduced (0.5f), theme::radius, 1.0f);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.95f), outer.getX(), outer.getY(), theme::accent.brighter (0.4f).withAlpha (0.75f), outer.getRight(), outer.getBottom(), false));
+    g.drawRoundedRectangle (outer.reduced (1.6f), theme::radius - 1.0f, 2.2f);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.35f), outer.getX(), outer.getY(), Colours::white.withAlpha (0.05f), outer.getRight(), outer.getBottom(), false));
+    g.drawRoundedRectangle (outer.reduced (4.2f), theme::radius - 3.6f, 1.6f);
     String status;
     if (linear) status << "Linear phase  (latency " << roundToInt (1000.0 * proc.getLatencySamples() / jmax (1.0, fs)) << " ms, dynamic bands act static)    ";
     if (proc.spectralActive())

@@ -97,6 +97,14 @@ jobs:
           name: PotatoEQ-${{ matrix.name }}
           path: dist
 
+      - name: Upload screenshots (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: screenshots
+          path: screenshot*.png
+          retention-days: 3
+
       - name: Installer checksum
         if: runner.os != 'Linux'
         shell: bash
@@ -112,6 +120,31 @@ jobs:
         with:
           name: PotatoEQ-${{ matrix.name }}-Installer
           path: installers
+
+  screenshots:
+    # Publishes the Linux harness screenshots to the "screenshots" branch (one commit, replaced each run,
+    # so the repo doesn't grow). Never touches main. Skipped for pull requests from forks.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency: screenshots-branch
+    permissions:
+      contents: write   # only this job and release may write, and this one only to the screenshots branch
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: screenshots
+          path: shots
+      - name: Push to the screenshots branch
+        env:
+          SRC_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          cd shots
+          printf 'Screenshots from %s (%s), run %s\n' "$SRC_BRANCH" "$GITHUB_SHA" "$GITHUB_RUN_ID" > README.txt
+          git init -q -b screenshots
+          git -c user.name=github-actions -c user.email=41898282+github-actions[bot]@users.noreply.github.com add -A
+          git -c user.name=github-actions -c user.email=41898282+github-actions[bot]@users.noreply.github.com commit -qm "Screenshots: $SRC_BRANCH @ ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" screenshots
 
   release:
     # Every successful build of main is published as a GitHub Release, so the plugin is one click away.

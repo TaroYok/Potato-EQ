@@ -137,3 +137,41 @@ private:
     PotatoEQProcessor::AutoSnapshot snap;
     juce::String status;
 };
+
+// Round glass button with a drawn icon: the settings cog or the add-module plus.
+class GlassIconButton : public juce::Button
+{
+public:
+    enum Icon { cog, plus };
+    GlassIconButton (const juce::String& name, Icon i) : juce::Button (name), icon (i) {}
+    void paintButton (juce::Graphics&, bool over, bool down) override;
+private:
+    Icon icon;
+};
+
+// A see-through glass card that holds other controls (settings popover).
+class GlassSheet : public juce::Component
+{
+public:
+    void paint (juce::Graphics& g) override { theme::drawGlassPanel (g, getLocalBounds().toFloat().reduced (0.5f), 16.0f, theme::panel.darker (0.3f)); }
+};
+
+// Aero dock: a row of glossy bubbles, one per added module. Clicking one opens or closes its sheet.
+class ModuleDock : public juce::Component
+{
+public:
+    enum Module { loudnessModule = 0, autoEqModule = 1 };
+    struct Item { int id; juce::String name; };
+    void setItems (std::vector<Item> items, int openId);
+    int preferredWidth() const { return juce::jmax (1, (int) items.size()) * kSlot + 28; }
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
+    std::function<void (int)> onClick;
+    static constexpr int kSlot = 78;
+private:
+    int slotAt (juce::Point<int>) const;
+    std::vector<Item> items;
+    int open = -1, hover = -1;
+};

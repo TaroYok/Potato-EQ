@@ -51,7 +51,8 @@ juce_add_binary_data(PotatoFonts SOURCES
     Resources/Fonts/Inter-Regular.ttf Resources/Fonts/Inter-Bold.ttf
     Resources/Fonts/DMSans-Regular.ttf Resources/Fonts/DMSans-Bold.ttf
     Resources/Fonts/Manrope-Regular.ttf Resources/Fonts/Manrope-Bold.ttf
-    Resources/Fonts/Quicksand-Regular.ttf Resources/Fonts/Quicksand-Bold.ttf)
+    Resources/Fonts/Quicksand-Regular.ttf Resources/Fonts/Quicksand-Bold.ttf
+    Resources/Fonts/InterDisplay-Medium.otf Resources/Fonts/InterDisplay-Bold.otf)
 set_target_properties(PotatoFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Core DSP is plain C++ (no GUI), shared by the plugin and the test runner.

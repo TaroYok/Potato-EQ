@@ -1,7 +1,7 @@
 # Potato EQ
 
 A 24-band parametric EQ (VST3 / AU / standalone) with a built-in LUFS meter and an
-**Auto EQ** (under the **Experimental tools** switch, top right. While that's off, the Auto EQ is hidden and does nothing) that listens to your audio and steers its tonal balance toward a
+**Auto EQ** (experimental: add it with the **+** button, top right. Until it's added it does nothing) that listens to your audio and steers its tonal balance toward a
 genre or instrument target curve.
 
 ![Potato EQ](docs/screenshot.png)
@@ -17,6 +17,17 @@ Note: the green **Code → Download ZIP** button gives you the *source code*, no
 Every push to `main` also builds the plugin; those builds are under **Actions → Build plugin → Artifacts**.
 
 ## Features
+
+**Interface**
+- Frutiger Aero glass look: clear glass panels over a scene. **Themes** (cog → Display → Theme) set colours, scene and analyzer
+  colours together: **Sky Aero** (default), **Ocean**, **Sunset Beach**, **Aurora Night**, **Meadow** and **Colour Void**.
+  The classic colour schemes are still there, and Display → Background swaps just the scene
+- The analyzer fills the window; the band editor floats over it while a band is selected
+- **Modules**: the loudness meter and the Auto EQ are modules. Add or remove them with **+** (top right); they sit in the dock
+  at the bottom, and clicking one opens its glass sheet over the analyzer
+- Settings (phase mode, analyzer, range, freeze, auto gain, scale, output, Display menu) live behind the **cog**, top right;
+  the In / Out meters stay on the right
+- Colourblind-friendly colours: band colours based on the Okabe-Ito palette, and status colours that never rely on red vs green
 
 **EQ**
 - 24 bands: Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf

@@ -9,7 +9,7 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
 {
     theme::applySchemeFromState (proc.apvts.state);
     ++theme::openEditors();
-    theme::setUiFont (ana::get (proc.apvts.state, ana::uiFont, 4));
+    theme::setUiFont (ana::get (proc.apvts.state, ana::uiFont, theme::kDefaultFont));
     lnf.refreshColours();
     setLookAndFeel (&lnf);
     auto& s = proc.apvts;
@@ -26,38 +26,54 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
         sl->setSliderStyle (Slider::LinearHorizontal);
         sl->setTextBoxStyle (Slider::TextBoxRight, false, 52, 18);
         sl->setColour (Slider::trackColourId, theme::accent);
-        addAndMakeVisible (*sl);
     }
     aScale = std::make_unique<APVTS::SliderAttachment> (s, params::id::gainScale, scale);
     aOut = std::make_unique<APVTS::SliderAttachment> (s, params::id::outGain, out);
     scale.setTooltip ("Scales the gain of every band (100% = as drawn).");
-    scaleL.setText ("Scale", dontSendNotification); outL.setText ("Out", dontSendNotification);
-    for (auto* l : { &scaleL, &outL }) { l->setColour (Label::textColourId, theme::textDim); l->setJustificationType (Justification::centredRight); addAndMakeVisible (*l); }
+    scaleL.setText ("Scale", dontSendNotification); outL.setText ("Output", dontSendNotification);
     aAutoGain = std::make_unique<APVTS::ButtonAttachment> (s, params::id::autoGain, autoGain);
-    aExperimental = std::make_unique<APVTS::ButtonAttachment> (s, params::id::experimental, experimental);
-    experimental.setTooltip ("Shows tools that are still being tuned, like the Auto EQ. While this is off they're hidden and do nothing.");
-    experimental.onStateChange = [this] { updateExperimental(); };
-    addAndMakeVisible (experimental);
     autoGain.setTooltip ("Keeps the perceived level steady while you EQ, so louder doesn't fool you into thinking better.");
 
     // analyzer extras: freeze is momentary (not saved), the rest is saved with the project
     proc.apvts.state.setProperty (ana::freeze, 0, nullptr);
     freeze.setTooltip ("Freeze the spectrum analyzer.");
     freeze.onClick = [this] { proc.apvts.state.setProperty (ana::freeze, freeze.getToggleState() ? 1 : 0, nullptr); };
-    anaMenu.setTooltip ("Analyzer resolution, speed, tilt, range and peak hold.");
+    anaMenu.setTooltip ("Analyzer resolution, speed, tilt, range, peak hold, colours, font and background.");
     anaMenu.onClick = [this] { showAnalyzerMenu(); };
     presetBtn.setTooltip ("Factory presets: character EQs, instruments, vocals, mastering and filter sweeps.");
     presetBtn.onClick = [this] { showPresetMenu(); };
     if (proc.getCurrentProgram() > 0) presetBtn.setButtonText (presets::all()[(size_t) proc.getCurrentProgram()].name);
 
+    // settings live behind the cog, in a glass sheet under it
+    phaseL.setText ("Phase", dontSendNotification); analyzerL.setText ("Analyzer", dontSendNotification); rangeL.setText ("Range", dontSendNotification);
+    for (auto* l : { &phaseL, &analyzerL, &rangeL, &scaleL, &outL })
+    {
+        l->setColour (Label::textColourId, theme::textDim);
+        l->setJustificationType (Justification::centredLeft);
+        settings.addAndMakeVisible (*l);
+    }
     for (auto* c : { (Component*) &phase, (Component*) &analyzer, (Component*) &range, (Component*) &autoGain,
-                     (Component*) &freeze, (Component*) &anaMenu, (Component*) &presetBtn,
-                     (Component*) &display, (Component*) &loudness, (Component*) &autoPanel })
-        addAndMakeVisible (*c);
-    addAndMakeVisible (bandPanel);   // fixed box under the display
-    addAndMakeVisible (meters);
+                     (Component*) &freeze, (Component*) &anaMenu, (Component*) &scale, (Component*) &out })
+        settings.addAndMakeVisible (*c);
+    cogBtn.setTooltip ("Settings: phase mode, analyzer, range, auto gain, output and the Display menu.");
+    cogBtn.setClickingTogglesState (false);
+    cogBtn.onClick = [this] { showSettings (! settings.isVisible()); };
+    addBtn.setTooltip ("Add a module: the loudness meter or the Auto EQ.");
+    addBtn.onClick = [this] { showModuleMenu(); };
 
-    display.onSelectionChanged = [this] (int b) { bandPanel.setBand (b); };
+    addAndMakeVisible (presetBtn);
+    addAndMakeVisible (display);
+    addAndMakeVisible (meters);
+    addAndMakeVisible (dock);
+    addChildComponent (bandPanel);   // floats over the display while a band is selected
+    addChildComponent (loudness);
+    addChildComponent (autoPanel);
+    addChildComponent (settings);
+    addAndMakeVisible (cogBtn);
+    addAndMakeVisible (addBtn);
+
+    dock.onClick = [this] (int m) { openModule (openSheet == m ? -1 : m); };
+    display.onSelectionChanged = [this] (int b) { bandPanel.setBand (b); layoutOverlays(); };
     bandPanel.onDelete = [this] (int b)
     {
         proc.setParam (params::bandId (b, "used"), 0.0f);
@@ -66,15 +82,79 @@ PotatoEQEditor::PotatoEQEditor (PotatoEQProcessor& p)
     };
 
     setResizable (true, true);
-    setResizeLimits (1340, 800, 2000, 1300);
-    autoPanel.setVisible (experimental.getToggleState());
+    setResizeLimits (1100, 700, 2000, 1300);
     setSize (1360, 860);
+    syncModules();
+    startTimerHz (8);
 }
 
-void PotatoEQEditor::updateExperimental()
+bool PotatoEQEditor::loudnessAdded() const { return ana::get (proc.apvts.state, ana::modLoudness, 1) != 0; }
+bool PotatoEQEditor::autoEqAdded() const
 {
-    const bool on = experimental.getToggleState();
-    if (autoPanel.isVisible() != on) { autoPanel.setVisible (on); resized(); }
+    if (auto* p = proc.apvts.getRawParameterValue (params::id::experimental)) return p->load() > 0.5f;
+    return false;
+}
+
+void PotatoEQEditor::timerCallback() { syncModules(); }
+
+// keep the dock (and any open sheet) in step with which modules are added, including after automation or a preset
+void PotatoEQEditor::syncModules()
+{
+    std::vector<ModuleDock::Item> items;
+    if (loudnessAdded()) items.push_back ({ ModuleDock::loudnessModule, "Loudness" });
+    if (autoEqAdded()) items.push_back ({ ModuleDock::autoEqModule, "Auto EQ" });
+    if ((openSheet == ModuleDock::loudnessModule && ! loudnessAdded()) || (openSheet == ModuleDock::autoEqModule && ! autoEqAdded()))
+        openSheet = -1;
+    const bool changed = items.size() != (size_t) dockCount || openSheet != dockOpen;
+    dockCount = (int) items.size(); dockOpen = openSheet;
+    dock.setItems (std::move (items), openSheet);
+    if (changed) layoutOverlays();
+}
+
+void PotatoEQEditor::openModule (int m)
+{
+    openSheet = m;
+    syncModules();
+    layoutOverlays();
+}
+
+void PotatoEQEditor::showSettings (bool on)
+{
+    settings.setVisible (on);
+    cogBtn.setToggleState (on, dontSendNotification);
+    if (on) settings.toFront (false);
+}
+
+void PotatoEQEditor::showModuleMenu()
+{
+    PopupMenu m;
+    m.addSectionHeader ("Modules");
+    m.addItem (1, "Loudness meter (LUFS, auto level, limiter)", true, loudnessAdded());
+    m.addItem (2, "Auto EQ (experimental)", true, autoEqAdded());
+    SafePointer<PotatoEQEditor> safe (this);
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&addBtn), [safe] (int r)
+    {
+        if (safe == nullptr || r == 0) return;
+        auto& pr = safe->proc;
+        if (r == 1)
+        {
+            const bool add = ! safe->loudnessAdded();
+            pr.apvts.state.setProperty (ana::modLoudness, add ? 1 : 0, nullptr);
+            safe->openModule (add ? (int) ModuleDock::loudnessModule : -1);
+        }
+        else if (r == 2)
+        {
+            const bool add = ! safe->autoEqAdded();
+            pr.setParam (params::id::experimental, add ? 1.0f : 0.0f);
+            safe->openModule (add ? (int) ModuleDock::autoEqModule : -1);
+        }
+    });
+}
+
+void PotatoEQEditor::setBackdrop (int i)
+{
+    proc.apvts.state.setProperty (ana::backdrop, i, nullptr);
+    refreshLook();
 }
 
 PotatoEQEditor::~PotatoEQEditor()
@@ -102,24 +182,33 @@ void PotatoEQEditor::showAnalyzerMenu()
     fill (vw, ana::viewNames, ana::view, 0, 600);
     fill (fl, ana::fillNames, ana::fill, 1, 700);
     {
-        const int cur = ana::get (st, ana::palette, 0);
+        const int cur = ana::get (st, ana::palette, ana::kDefaultPalette);
         for (int i = 0; i < (int) theme::palettePresets().size(); ++i) col.addItem (800 + i, theme::palettePresets()[(size_t) i].name, true, cur == i);
         col.addSeparator();
         col.addItem (899, "Custom colours...", true, cur >= (int) theme::palettePresets().size());
     }
     {
-        const int cur = ana::get (st, ana::scheme, 0);
+        const int cur = ana::get (st, ana::scheme, theme::kDefaultScheme);
+        sch.addSectionHeader ("Themes (colours + scene)");
+        for (int i = theme::kFirstTheme; i < theme::numSchemeSlots(); ++i) sch.addItem (950 + i, theme::schemeAt (i)->name, true, cur == i);
+        sch.addSectionHeader ("Colour schemes");
         for (int i = 0; i < (int) theme::schemes().size(); ++i) sch.addItem (950 + i, theme::schemes()[(size_t) i].name, true, cur == i);
         sch.addSeparator();
-        sch.addItem (990, "Custom colours...", true, cur >= (int) theme::schemes().size());
+        sch.addItem (990, "Custom colours...", true, cur == theme::kCustomScheme);
     }
     m.addSectionHeader ("Look");
-    m.addSubMenu ("Colour scheme", sch);
+    m.addSubMenu ("Theme", sch);
     {
         PopupMenu fm;
-        const int cur = ana::get (st, ana::uiFont, 4);
+        const int cur = ana::get (st, ana::uiFont, theme::kDefaultFont);
         for (int i = 0; i < theme::fontNames.size(); ++i) fm.addItem (1100 + i, theme::fontNames[i], true, cur == i);
         m.addSubMenu ("Font", fm);
+    }
+    {
+        PopupMenu bd;
+        const int cur = ana::get (st, ana::backdrop, 0);
+        for (int i = 0; i < ana::backdropNames.size(); ++i) bd.addItem (1200 + i, ana::backdropNames[i], true, cur == i);
+        m.addSubMenu ("Background", bd);
     }
     {
         PopupMenu un;
@@ -148,6 +237,7 @@ void PotatoEQEditor::showAnalyzerMenu()
     {
         if (safe == nullptr || r == 0) return;
         auto& s = safe->proc.apvts.state;
+        if (r >= 1200) { safe->setBackdrop (r - 1200); return; }
         if (r >= 1100) { safe->setUiFont (r - 1100); return; }
         if (r >= 1000) { s.setProperty (ana::units, r - 1000, nullptr); return; }
         if (r == 990) { safe->showSchemeDialog(); return; }
@@ -245,9 +335,14 @@ void PotatoEQEditor::setScheme (int i)
 {
     auto& st = proc.apvts.state;
     st.setProperty (ana::scheme, i, nullptr);
-    st.setProperty (ana::palette, theme::schemes()[(size_t) i].palette, nullptr);   // matching analyzer colours (still changeable)
+    if (const auto* sc = theme::schemeAt (i))
+    {
+        st.setProperty (ana::palette, sc->palette, nullptr);   // matching analyzer colours (still changeable)
+        if (sc->backdrop >= 0) { st.setProperty (ana::backdrop, sc->backdrop, nullptr); theme::backdropMode() = sc->backdrop; }
+    }
     theme::applyScheme (i);
     lnf.refreshColours();
+    backdropDirty = true;
     sendLookAndFeelChange();
     repaint();
 }
@@ -256,6 +351,7 @@ void PotatoEQEditor::refreshLook()
 {
     theme::applySchemeFromState (proc.apvts.state);
     lnf.refreshColours();
+    backdropDirty = true;
     sendLookAndFeelChange();
     repaint();
 }
@@ -264,6 +360,7 @@ void PotatoEQEditor::setUiFont (int i)
 {
     proc.apvts.state.setProperty (ana::uiFont, i, nullptr);
     theme::setUiFont (i);
+    backdropDirty = true;   // the logo is part of the cached backdrop
     sendLookAndFeelChange();
     resized();
     repaint();
@@ -276,12 +373,12 @@ public:
     SchemeDialog (ValueTree st, std::function<void()> changed) : state (st), onChanged (std::move (changed))
     {
         // start from whatever is on screen right now
-        const int cur = ana::get (state, ana::scheme, 0);
-        if (cur < (int) theme::schemes().size())
+        const int cur = ana::get (state, ana::scheme, theme::kDefaultScheme);
+        if (theme::schemeAt (cur) != nullptr)
         {
             const auto k = theme::slotsFromScheme (cur);
             for (int i = 0; i < theme::kCustomSlots; ++i) state.setProperty (ana::customSlot (i), (int64) k[(size_t) i].getARGB(), nullptr);
-            state.setProperty (ana::scheme, (int) theme::schemes().size(), nullptr);
+            state.setProperty (ana::scheme, theme::kCustomScheme, nullptr);
             onChanged();
         }
         for (int i = 0; i < theme::kCustomSlots; ++i)
@@ -346,24 +443,54 @@ void PotatoEQEditor::showColourDialog()
 
 void PotatoEQEditor::paint (Graphics& g)
 {
-    auto b = getLocalBounds().toFloat();
-    // glossy black glass with a diagonal reflection, like the face of an iPod touch
-    g.setGradientFill (ColourGradient (theme::bgTop, 0, 0, theme::bgBottom, 0, b.getBottom(), false));
-    g.fillAll();
-    Path refl;
-    refl.startNewSubPath (0, 0); refl.lineTo (b.getWidth() * 0.62f, 0); refl.lineTo (b.getWidth() * 0.30f, b.getHeight()); refl.lineTo (0, b.getHeight()); refl.closeSubPath();
-    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.045f), 0, 0, Colours::white.withAlpha (0.0f), b.getWidth() * 0.45f, b.getHeight() * 0.6f, false));
-    g.fillPath (refl);
+    // The backdrop is costly (gradients, bubbles) and shows through the see-through panels, so the
+    // analyzer's frequent repaints would redraw it every frame: render it once into an image instead.
+    const float sc = jmax (1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    const int w = roundToInt ((float) getWidth() * sc), h = roundToInt ((float) getHeight() * sc);
+    // rebuild when the size or anything the backdrop uses changes (scheme, custom colours, font)
+    const auto key = String::toHexString ((int64) theme::bgTop.getARGB()) + String::toHexString ((int64) theme::bgBottom.getARGB())
+                   + String::toHexString ((int64) theme::navTop.getARGB()) + String::toHexString ((int64) theme::navBottom.getARGB())
+                   + String::toHexString ((int64) theme::accent.getARGB()) + String::toHexString ((int64) theme::accent2.getARGB())
+                   + String::toHexString ((int64) theme::navText.getARGB()) + String (theme::uiFontScale()) + String (theme::backdropMode())
+                   + display.getBounds().toString() + meters.getBounds().toString() + dock.getBounds().toString();
+    if (backdropDirty || key != backdropKey || backdrop.getWidth() != w || backdrop.getHeight() != h)
+    {
+        backdropKey = key;
+        backdrop = Image (Image::ARGB, jmax (1, w), jmax (1, h), true);
+        Graphics ig (backdrop);
+        ig.addTransform (AffineTransform::scale (sc));
+        paintBackdrop (ig);
+        backdropDirty = false;
+    }
+    g.drawImage (backdrop, getLocalBounds().toFloat());
+}
 
-    // iPhone OS style navigation bar: slate-blue gloss, chrome edge
+void PotatoEQEditor::paintBackdrop (Graphics& g)
+{
+    auto b = getLocalBounds().toFloat();
+    // the scene behind all the glass: sky and nature, or the colour void (Display > Background)
+    theme::paintScene (g, b, theme::backdropMode());
+    // every glass slab bends the scene behind it (the panels themselves are see-through)
+    for (auto* c : { (Component*) &display, (Component*) &meters })
+        theme::drawGlassSlabInScene (g, c->getBounds().toFloat(), b, theme::radius);
+    if (dock.isVisible() && dock.preferredWidth() > 30)
+        theme::drawGlassSlabInScene (g, dock.getBounds().toFloat().reduced (2.0f).withTrimmedTop ((float) dock.getHeight() * 0.30f), b, 18.0f);
+
+    // glossy glass title bar
     auto head = b.removeFromTop (44.0f).reduced (6.0f, 4.0f);
-    g.setGradientFill (ColourGradient (theme::navTop, 0, head.getY(), theme::navBottom, 0, head.getBottom(), false));
+    theme::drawGlassSlabInScene (g, head, getLocalBounds().toFloat(), theme::radius);
+    g.setGradientFill (ColourGradient (theme::navTop.withAlpha (0.38f), 0, head.getY(), theme::navBottom.withAlpha (0.55f), 0, head.getBottom(), false));
     g.fillRoundedRectangle (head, theme::radius);
-    auto gloss = head.withHeight (head.getHeight() * 0.5f);
-    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.30f), 0, gloss.getY(), Colours::white.withAlpha (0.08f), 0, gloss.getBottom(), false));
-    g.fillRoundedRectangle (gloss, theme::radius);
-    g.setColour (Colours::black.withAlpha (0.45f));
-    g.drawRoundedRectangle (head, theme::radius, 1.0f);
+    auto under = head.reduced (2.0f).removeFromBottom (head.getHeight() * 0.4f);
+    g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.0f), 0, under.getY(), theme::accent.withAlpha (0.45f), 0, under.getBottom(), false));
+    g.fillRoundedRectangle (under, theme::radius - 2.0f);
+    theme::drawAeroSheen (g, head.reduced (1.0f), theme::radius - 1.0f, 1.25f);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.7f), 0, head.getY(), theme::accent.withAlpha (0.6f), 0, head.getBottom(), false));
+    g.drawRoundedRectangle (head.reduced (0.5f), theme::radius, 1.2f);
+
+    // thin glass rim around the whole window
+    g.setColour (Colours::white.withAlpha (0.10f));
+    g.drawRect (getLocalBounds().toFloat(), 1.0f);
 
     // engraved logo
     auto top = getLocalBounds().removeFromTop (44).reduced (16, 0);
@@ -375,36 +502,66 @@ void PotatoEQEditor::paint (Graphics& g)
     g.setColour (theme::navText);
     g.drawText ("POTATO", logo.withWidth (84), Justification::centredLeft);
     g.setFont (theme::font (21.0f));
-    g.setColour (theme::navText.withAlpha (0.85f));
+    const auto eqCol = theme::accent.brighter (0.5f);
+    g.setColour (eqCol.withAlpha (0.35f));   // soft glow behind "EQ"
+    for (auto d : { Point<int> (-1, 0), Point<int> (1, 0), Point<int> (0, -1), Point<int> (0, 1) })
+        g.drawText ("EQ", logo.withTrimmedLeft (84).translated (d.x, d.y), Justification::centredLeft);
+    g.setColour (eqCol);
     g.drawText ("EQ", logo.withTrimmedLeft (84), Justification::centredLeft);
 }
 
 void PotatoEQEditor::resized()
 {
     auto r = getLocalBounds();
-    auto top = r.removeFromTop (44).reduced (10, 9);
+    auto top = r.removeFromTop (44).reduced (10, 8);
     top.removeFromLeft (128);
-    presetBtn.setBounds (top.removeFromLeft (130)); top.removeFromLeft (8);
-    phase.setBounds (top.removeFromLeft (118)); top.removeFromLeft (8);
-    analyzer.setBounds (top.removeFromLeft (100)); top.removeFromLeft (6);
-    anaMenu.setBounds (top.removeFromLeft (86)); top.removeFromLeft (6);
-    freeze.setBounds (top.removeFromLeft (72)); top.removeFromLeft (8);
-    range.setBounds (top.removeFromLeft (70)); top.removeFromLeft (10);
-    autoGain.setBounds (top.removeFromLeft (96));
-    experimental.setBounds (top.removeFromRight (140)); top.removeFromRight (10);
-    out.setBounds (top.removeFromRight (128)); outL.setBounds (top.removeFromRight (32));
-    top.removeFromRight (6);
-    scale.setBounds (top.removeFromRight (128)); scaleL.setBounds (top.removeFromRight (40));
+    presetBtn.setBounds (top.removeFromLeft (220));
+    addBtn.setBounds (top.removeFromRight (34));
+    top.removeFromRight (8);
+    cogBtn.setBounds (top.removeFromRight (34));
 
-    r.reduce (10, 0); r.removeFromBottom (10);
-    auto side = r.removeFromRight (290);
-    r.removeFromRight (10);
-    loudness.setBounds (autoPanel.isVisible() ? side.removeFromTop (440) : side);
-    side.removeFromTop (10);
-    autoPanel.setBounds (side);
-    bandPanel.setBounds (r.removeFromBottom (BandPanel::kHeight + 8));
-    r.removeFromBottom (8);
-    meters.setBounds (r.removeFromRight (92));
+    // settings sheet, hanging under the cog
+    {
+        const int w = 340, rowH = 26, gap = 8;
+        settings.setBounds (cogBtn.getRight() - w + 6, 46, w, 12 + 6 * (rowH + gap) + 4);
+        auto s = settings.getLocalBounds().reduced (14, 12);
+        auto row = [&] { auto x = s.removeFromTop (rowH); s.removeFromTop (gap); return x; };
+        auto r1 = row(); phaseL.setBounds (r1.removeFromLeft (78)); phase.setBounds (r1);
+        auto r2 = row(); analyzerL.setBounds (r2.removeFromLeft (78)); anaMenu.setBounds (r2.removeFromRight (100)); r2.removeFromRight (6); analyzer.setBounds (r2);
+        auto r3 = row(); rangeL.setBounds (r3.removeFromLeft (78)); freeze.setBounds (r3.removeFromRight (100)); r3.removeFromRight (6); range.setBounds (r3);
+        auto r4 = row(); r4.removeFromLeft (78); autoGain.setBounds (r4);
+        auto r5 = row(); scaleL.setBounds (r5.removeFromLeft (78)); scale.setBounds (r5);
+        auto r6 = row(); outL.setBounds (r6.removeFromLeft (78)); out.setBounds (r6);
+    }
+
+    r.reduce (10, 0);
+    auto bottom = r.removeFromBottom (84);
+    const int dw = dock.preferredWidth();
+    dock.setBounds (bottom.withSizeKeepingCentre (dw, 80));
+    meters.setBounds (r.removeFromRight (78).withTrimmedBottom (4));
     r.removeFromRight (8);
-    display.setBounds (r);
+    display.setBounds (r.withTrimmedBottom (4));
+    layoutOverlays();
+}
+
+// Things that float over the analyzer: the band editor near the selected band, and the open module sheet.
+void PotatoEQEditor::layoutOverlays()
+{
+    dock.setBounds (dock.getBounds().withSizeKeepingCentre (dock.preferredWidth(), dock.getHeight()));
+    const auto d = display.getBounds();
+    const int b = display.getSelected();
+    if (b >= 0)
+    {
+        const int w = jmin (996, d.getWidth() - 24), h = BandPanel::kHeight;
+        const int nodeX = d.getX() + roundToInt (display.bandNodePosition (b).x);
+        const int x = jlimit (d.getX() + 12, d.getRight() - 12 - w, nodeX - w / 2);
+        bandPanel.setBounds (x, d.getBottom() - h - 30, w, h);
+    }
+    bandPanel.setVisible (b >= 0);
+    const int sw = 300, sx = d.getRight() - sw - 34, sy = d.getY() + 40;
+    loudness.setBounds (sx, sy, sw, jmin (440, d.getHeight() - 60));
+    autoPanel.setBounds (sx, sy, sw, jmin (400, d.getHeight() - 60));
+    loudness.setVisible (openSheet == ModuleDock::loudnessModule);
+    autoPanel.setVisible (openSheet == ModuleDock::autoEqModule);
+    if (settings.isVisible()) settings.toFront (false);
 }
