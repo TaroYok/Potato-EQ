@@ -81,23 +81,49 @@ inline void drawAeroSheen (juce::Graphics& g, juce::Rectangle<float> r, float ra
     g.drawHorizontalLine ((int) r.getY() + 1, r.getX() + rad * 0.6f, r.getRight() - rad * 0.6f);
 }
 
-// Rounded clear-glass panel: a thin dark tint you can see the scene through (no frosting), a crisp
-// curved Aero gloss, accent light pooling at the bottom, and a bright chrome rim.
+// Rounded clear-glass slab: a thin tint you can see the scene through, a thick bevelled edge that
+// catches light (bright top-left, glowing bottom), a diagonal glare and a crisp curved Aero gloss.
 // `smoke` adds a clear dark tint (not frost) for sheets that float over the busy analyzer.
 inline void drawGlassPanel (juce::Graphics& g, juce::Rectangle<float> r, float rad = radius, Colour tint = panel, float smoke = 0.0f)
 {
     if (smoke > 0.0f) { g.setColour (juce::Colour (0xff05020c).withAlpha (smoke)); g.fillRoundedRectangle (r, rad); }
-    g.setGradientFill (juce::ColourGradient (tint.withAlpha (0.42f), 0, r.getY(), tint.darker (0.6f).withAlpha (0.62f), 0, r.getBottom(), false));
+    g.setGradientFill (juce::ColourGradient (tint.withAlpha (0.26f), 0, r.getY(), tint.darker (0.6f).withAlpha (0.46f), 0, r.getBottom(), false));
     g.fillRoundedRectangle (r, rad);
+    {   // diagonal glare across the slab
+        juce::Graphics::ScopedSaveState ss (g);
+        juce::Path clip; clip.addRoundedRectangle (r, rad);
+        g.reduceClipRegion (clip);
+        const float d = juce::jmin (r.getWidth(), r.getHeight()) * 0.9f + 60.0f;
+        juce::Path glare;
+        glare.startNewSubPath (r.getX() + r.getWidth() * 0.10f, r.getY());
+        glare.lineTo (r.getX() + r.getWidth() * 0.10f + d * 0.55f, r.getY());
+        glare.lineTo (r.getX() + r.getWidth() * 0.10f - d * 0.45f, r.getY() + d);
+        glare.lineTo (r.getX() + r.getWidth() * 0.10f - d, r.getY() + d);
+        glare.closeSubPath();
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.16f), r.getX(), r.getY(), juce::Colours::white.withAlpha (0.0f), r.getX() + d * 0.2f, r.getY() + d, false));
+        g.fillPath (glare);
+    }
     auto glow = r.reduced (2.0f).removeFromBottom (juce::jmin (60.0f, r.getHeight() * 0.4f));
-    g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.0f), 0, glow.getY(), accent.withAlpha (0.22f), 0, glow.getBottom(), false));
+    g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.0f), 0, glow.getY(), accent.withAlpha (0.26f), 0, glow.getBottom(), false));
     g.fillRoundedRectangle (glow, rad - 2.0f);
-    drawAeroSheen (g, r.reduced (1.5f), rad - 1.5f, 0.85f);
-    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.85f), 0, r.getY(), accent.withAlpha (0.55f), 0, r.getBottom(), false));
-    g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.4f);
-    g.setColour (juce::Colours::black.withAlpha (0.25f));
-    g.drawRoundedRectangle (r.reduced (1.9f), rad - 1.4f, 0.8f);
+    drawAeroSheen (g, r.reduced (2.5f), rad - 2.5f, 1.0f);
+    // thick bevelled edge: an outer dark line, a wide bright band inside it, then a hairline
+    g.setColour (juce::Colours::black.withAlpha (0.45f));
+    g.drawRoundedRectangle (r.expanded (0.5f), rad + 0.5f, 1.0f);
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.95f), r.getX(), r.getY(), accent.brighter (0.4f).withAlpha (0.75f), r.getRight(), r.getBottom(), false));
+    g.drawRoundedRectangle (r.reduced (1.0f), rad - 1.0f, 2.2f);
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.35f), r.getX(), r.getY(), juce::Colours::white.withAlpha (0.05f), r.getRight(), r.getBottom(), false));
+    g.drawRoundedRectangle (r.reduced (3.6f), rad - 3.6f, 1.6f);
+    g.setColour (juce::Colours::black.withAlpha (0.2f));
+    g.drawRoundedRectangle (r.reduced (5.0f), rad - 5.0f, 0.8f);
+    // caustic: light focused along the bottom inner edge
+    g.setGradientFill (juce::ColourGradient (accent.brighter (0.6f).withAlpha (0.0f), r.getX(), 0, accent.brighter (0.6f).withAlpha (0.8f), r.getCentreX(), 0, true));
+    g.drawHorizontalLine ((int) (r.getBottom() - 3.0f), r.getX() + rad, r.getRight() - rad);
 }
+
+// Glass refraction for the cached backdrop: shadow under a slab, then the scene seen through it,
+// magnified and shifted the way a thick lens would.
+void drawGlassSlabInScene (juce::Graphics&, juce::Rectangle<float> slab, juce::Rectangle<float> scene, float rad);   // Panels.cpp
 
 // The scene behind everything (Display > Background): 0 = sky and nature, 1 = colour void.
 inline int& backdropMode() { static int m = 0; return m; }

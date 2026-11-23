@@ -451,7 +451,8 @@ void PotatoEQEditor::paint (Graphics& g)
     const auto key = String::toHexString ((int64) theme::bgTop.getARGB()) + String::toHexString ((int64) theme::bgBottom.getARGB())
                    + String::toHexString ((int64) theme::navTop.getARGB()) + String::toHexString ((int64) theme::navBottom.getARGB())
                    + String::toHexString ((int64) theme::accent.getARGB()) + String::toHexString ((int64) theme::accent2.getARGB())
-                   + String::toHexString ((int64) theme::navText.getARGB()) + String (theme::uiFontScale()) + String (theme::backdropMode());
+                   + String::toHexString ((int64) theme::navText.getARGB()) + String (theme::uiFontScale()) + String (theme::backdropMode())
+                   + display.getBounds().toString() + meters.getBounds().toString() + dock.getBounds().toString();
     if (backdropDirty || key != backdropKey || backdrop.getWidth() != w || backdrop.getHeight() != h)
     {
         backdropKey = key;
@@ -469,10 +470,16 @@ void PotatoEQEditor::paintBackdrop (Graphics& g)
     auto b = getLocalBounds().toFloat();
     // the scene behind all the glass: sky and nature, or the colour void (Display > Background)
     theme::paintScene (g, b, theme::backdropMode());
+    // every glass slab bends the scene behind it (the panels themselves are see-through)
+    for (auto* c : { (Component*) &display, (Component*) &meters })
+        theme::drawGlassSlabInScene (g, c->getBounds().toFloat(), b, theme::radius);
+    if (dock.isVisible() && dock.preferredWidth() > 30)
+        theme::drawGlassSlabInScene (g, dock.getBounds().toFloat().reduced (2.0f).withTrimmedTop ((float) dock.getHeight() * 0.30f), b, 18.0f);
 
     // glossy glass title bar
     auto head = b.removeFromTop (44.0f).reduced (6.0f, 4.0f);
-    g.setGradientFill (ColourGradient (theme::navTop.withAlpha (0.55f), 0, head.getY(), theme::navBottom.withAlpha (0.72f), 0, head.getBottom(), false));
+    theme::drawGlassSlabInScene (g, head, getLocalBounds().toFloat(), theme::radius);
+    g.setGradientFill (ColourGradient (theme::navTop.withAlpha (0.38f), 0, head.getY(), theme::navBottom.withAlpha (0.55f), 0, head.getBottom(), false));
     g.fillRoundedRectangle (head, theme::radius);
     auto under = head.reduced (2.0f).removeFromBottom (head.getHeight() * 0.4f);
     g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.0f), 0, under.getY(), theme::accent.withAlpha (0.45f), 0, under.getBottom(), false));

@@ -818,9 +818,14 @@ void EqDisplay::paint (Graphics& g)
         g.setColour (theme::text); g.drawText (message, box, Justification::centred);
     }
     // glass front: a faint curved reflection and a chrome rim over the whole plot
-    theme::drawAeroSheen (g, outer.reduced (1.0f), theme::radius - 1.0f, 0.22f);
-    g.setGradientFill (ColourGradient (theme::chrome.withAlpha (0.55f), 0, outer.getY(), theme::accent.withAlpha (0.3f), 0, outer.getBottom(), false));
-    g.drawRoundedRectangle (outer.reduced (0.6f), theme::radius, 1.2f);
+    theme::drawAeroSheen (g, outer.reduced (2.5f), theme::radius - 2.5f, 0.35f);
+    // thick bevelled glass edge, as on every other slab
+    g.setColour (Colours::black.withAlpha (0.45f));
+    g.drawRoundedRectangle (outer.reduced (0.5f), theme::radius, 1.0f);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.95f), outer.getX(), outer.getY(), theme::accent.brighter (0.4f).withAlpha (0.75f), outer.getRight(), outer.getBottom(), false));
+    g.drawRoundedRectangle (outer.reduced (1.6f), theme::radius - 1.0f, 2.2f);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.35f), outer.getX(), outer.getY(), Colours::white.withAlpha (0.05f), outer.getRight(), outer.getBottom(), false));
+    g.drawRoundedRectangle (outer.reduced (4.2f), theme::radius - 3.6f, 1.6f);
     String status;
     if (linear) status << "Linear phase  (latency " << roundToInt (1000.0 * proc.getLatencySamples() / jmax (1.0, fs)) << " ms, dynamic bands act static)    ";
     if (proc.spectralActive())

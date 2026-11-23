@@ -37,14 +37,16 @@ static void drawPill (Graphics& g, Rectangle<float> r, Colour base, bool over, b
 {
     const float rad = jmin (r.getHeight() * 0.5f, 10.0f);
     auto c = down ? base.brighter (0.25f) : over ? base.brighter (0.15f) : base;
-    g.setGradientFill (ColourGradient (c.brighter (0.3f).withAlpha (0.55f), 0, r.getY(), c.darker (0.45f).withAlpha (0.75f), 0, r.getBottom(), false));
+    g.setGradientFill (ColourGradient (c.brighter (0.3f).withAlpha (0.42f), 0, r.getY(), c.darker (0.45f).withAlpha (0.66f), 0, r.getBottom(), false));
     g.fillRoundedRectangle (r, rad);
     auto glow = r.reduced (1.5f).removeFromBottom (r.getHeight() * 0.45f);
     g.setGradientFill (ColourGradient (theme::accent.withAlpha (0.0f), 0, glow.getY(), theme::accent.withAlpha (over ? 0.35f : 0.18f), 0, glow.getBottom(), false));
     g.fillRoundedRectangle (glow, rad - 1.5f);
-    theme::drawAeroSheen (g, r.reduced (1.0f), rad - 1.0f, down ? 0.6f : 1.0f);
-    g.setGradientFill (ColourGradient (Colours::white.withAlpha (over ? 0.55f : 0.38f), 0, r.getY(), theme::accent.withAlpha (over ? 0.6f : 0.25f), 0, r.getBottom(), false));
-    g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
+    theme::drawAeroSheen (g, r.reduced (1.5f), rad - 1.5f, down ? 0.7f : 1.15f);
+    g.setColour (Colours::black.withAlpha (0.4f));
+    g.drawRoundedRectangle (r, rad, 0.8f);
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (over ? 0.95f : 0.8f), r.getX(), r.getY(), theme::accent.brighter (0.3f).withAlpha (over ? 0.9f : 0.55f), r.getRight(), r.getBottom(), false));
+    g.drawRoundedRectangle (r.reduced (1.0f), rad - 1.0f, 1.5f);
 }
 
 void PotatoLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h, float pos, float start, float end, Slider& s)
@@ -735,7 +737,7 @@ void LevelMeters::mouseDown (const MouseEvent&) { proc.resetMeter(); }
 
 void LevelMeters::paint (Graphics& g)
 {
-    theme::drawGlassPanel (g, getLocalBounds().toFloat(), theme::radius, theme::panel, 0.5f);
+    theme::drawGlassPanel (g, getLocalBounds().toFloat(), theme::radius, theme::panel, 0.2f);
     const bool db = ana::get (proc.apvts.state, ana::units, 0) == 1;
     const bool lim = proc.apvts.getRawParameterValue (params::id::limiter)->load() > 0.5f;
     auto area = getLocalBounds().toFloat().reduced (8.0f, 14.0f);
@@ -1272,4 +1274,27 @@ void ModuleDock::paint (Graphics& g)
         g.setFont (theme::font (11.0f, isOpen));
         g.drawText (items[(size_t) i].name, Rectangle<float> (14.0f + (float) i * kSlot, (float) getHeight() - 22.0f, (float) kSlot, 16.0f), Justification::centred);
     }
+}
+
+void theme::drawGlassSlabInScene (Graphics& g, Rectangle<float> slab, Rectangle<float> scene, float rad)
+{
+    // soft shadow the glass casts on the scene, and the light it focuses just below it
+    for (int i = 0; i < 6; ++i)
+    {
+        g.setColour (Colours::black.withAlpha (0.05f));
+        g.fillRoundedRectangle (slab.translated (0, 6.0f).expanded ((float) i * 2.0f), rad + (float) i * 2.0f);
+    }
+    g.setGradientFill (ColourGradient (theme::accent.brighter (0.6f).withAlpha (0.35f), slab.getCentreX(), slab.getBottom() + 4.0f,
+                                       theme::accent.withAlpha (0.0f), slab.getCentreX() + slab.getWidth() * 0.5f, slab.getBottom() + 4.0f, true));
+    g.fillRoundedRectangle (Rectangle<float> (slab.getX(), slab.getBottom() + 2.0f, slab.getWidth(), 10.0f), 5.0f);
+    // the scene, refracted: magnified about the slab centre and nudged down, slightly brighter
+    Graphics::ScopedSaveState ss (g);
+    Path clip; clip.addRoundedRectangle (slab, rad);
+    g.reduceClipRegion (clip);
+    const auto c = slab.getCentre();
+    g.addTransform (AffineTransform::translation (-c.x, -c.y).scaled (1.07f).translated (c.x, c.y + 6.0f));
+    theme::paintScene (g, scene, theme::backdropMode());
+    g.addTransform (AffineTransform());
+    g.setColour (Colours::white.withAlpha (0.05f));
+    g.fillRect (scene);
 }
