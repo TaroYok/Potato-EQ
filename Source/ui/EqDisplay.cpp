@@ -744,7 +744,7 @@ void EqDisplay::paint (Graphics& g)
         if (! s.used) continue;
         const auto pos = nodePosition (s);
         const auto c = theme::bandColour (b);
-        const float r = (b == selected || b == hovered) ? 8.5f : 7.0f;
+        const float r = (b == selected || b == hovered) ? 10.5f : 9.0f;
         if (s.dynamic && arc::typeSupportsDynamic (s.type) && (! linear || s.isSpectral()))
         {   // line + ring show where the dynamic range can take the band
             g.setColour (c.withAlpha (0.35f));
@@ -752,16 +752,20 @@ void EqDisplay::paint (Graphics& g)
             g.drawLine (pos.x, pos.y, pos.x, jlimit (a.getY(), a.getBottom(), yr), 2.0f);
             g.drawEllipse (Rectangle<float> (r * 2.4f, r * 2.4f).withCentre ({ pos.x, yr }), 1.2f);
         }
+        // flat, modern node: a solid dot with a crisp outline, a clean ring when selected, the band number on top
+        const auto dot = Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (pos);
         if (b == selected)
-        {   // soft halo around the selected band
-            g.setGradientFill (ColourGradient (c.withAlpha (0.45f), pos.x, pos.y, c.withAlpha (0.0f), pos.x + r * 2.6f, pos.y, true));
-            g.fillEllipse (Rectangle<float> (r * 5.2f, r * 5.2f).withCentre (pos));
+        {
+            g.setColour (Colours::white);
+            g.drawEllipse (dot.expanded (3.5f), 2.0f);
         }
-        theme::drawOrb (g, pos, r, s.bypass ? theme::panelHi : c, b == selected || b == hovered);
-        if (b == selected) { g.setColour (Colours::white.withAlpha (0.9f)); g.drawEllipse (Rectangle<float> (r * 2 + 3, r * 2 + 3).withCentre (pos), 1.5f); }
-        g.setColour (s.bypass ? theme::textDim : Colours::black.withAlpha (0.8f));
-        g.setFont (theme::font (10.0f, true));
-        g.drawText (String (b + 1), Rectangle<float> (r * 2, r * 2).withCentre (pos), Justification::centred);
+        g.setColour (s.bypass ? theme::panelHi : c);
+        g.fillEllipse (dot);
+        g.setColour (s.bypass ? c : Colours::black.withAlpha (0.35f));
+        g.drawEllipse (dot, s.bypass ? 1.5f : 1.0f);
+        g.setColour (s.bypass ? theme::textDim : Colour (0xff10131a));
+        g.setFont (theme::font (b >= 9 ? 10.0f : 11.0f, true));
+        g.drawText (String (b + 1), dot.translated (0, 0.5f), Justification::centred, false);
     }
 
     auto tag = [&] (Point<float> at, const String& t, Colour border)

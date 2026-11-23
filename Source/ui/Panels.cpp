@@ -840,232 +840,55 @@ void theme::setUiFont (int index)
 }
 
 // ---------------------------------------------------------------- scenes behind the glass
-namespace
-{
-Path hill (Rectangle<float> b, float base, const std::vector<float>& waves)
-{
-    Path p;
-    p.startNewSubPath (b.getX(), b.getBottom());
-    p.lineTo (b.getX(), b.getY() + b.getHeight() * base);
-    const int n = (int) waves.size();
-    for (int i = 0; i < n; ++i)
-    {
-        const float x0 = b.getX() + b.getWidth() * (float) i / (float) n, x1 = b.getX() + b.getWidth() * (float) (i + 1) / (float) n;
-        const float yEnd = b.getY() + b.getHeight() * (base + (i + 1 < n ? waves[(size_t) i + 1] * 0.25f : 0.0f));
-        p.quadraticTo ((x0 + x1) * 0.5f, b.getY() + b.getHeight() * (base - waves[(size_t) i]), x1, yEnd);
-    }
-    p.lineTo (b.getRight(), b.getBottom());
-    p.closeSubPath();
-    return p;
-}
-} // namespace
-
-void theme::paintScene (Graphics& g, Rectangle<float> b, int mode, bool simple)
+// Each scene is colour only: smooth gradients in the theme's colours, no drawn shapes.
+void theme::paintScene (Graphics& g, Rectangle<float> b, int mode, bool /*simple*/)
 {
     const float w = b.getWidth(), h = b.getHeight();
-    auto at = [&] (float fx, float fy) { return Point<float> (b.getX() + w * fx, b.getY() + h * fy); };
-    if (mode == 1)
-    {   // colour void: an endless, softly lit expanse of colour around a deep centre
-        g.setColour (Colour (0xff06030f)); g.fillRect (b);
-        auto blob = [&] (Colour c, float a, float fx, float fy, float rad)
-        {
-            const auto p = at (fx, fy);
-            g.setGradientFill (ColourGradient (c.withAlpha (a), p.x, p.y, c.withAlpha (0.0f), p.x + jmax (w, h) * rad, p.y, true));
-            g.fillRect (b);
-        };
-        blob (Colour (0xffff3fb4), 0.70f, 0.08f, 0.22f, 0.55f);   // magenta
-        blob (Colour (0xff7a3cff), 0.80f, 0.85f, 0.10f, 0.60f);   // violet
-        blob (Colour (0xff1fd2ff), 0.65f, 0.78f, 0.95f, 0.55f);   // aqua
-        blob (Colour (0xffff8a3d), 0.45f, 0.18f, 1.00f, 0.45f);   // orange
-        blob (Colour (0xffb6f24a), 0.22f, 1.00f, 0.55f, 0.35f);   // lime
-        blob (Colour (0xff3a5bff), 0.40f, 0.45f, 0.00f, 0.40f);   // blue
-        const auto c = at (0.5f, 0.52f);   // the void itself: darkness falling away into the centre
-        g.setGradientFill (ColourGradient (Colour (0xff020106).withAlpha (0.92f), c.x, c.y, Colour (0xff020106).withAlpha (0.0f), c.x + jmax (w, h) * 0.42f, c.y, true));
-        g.fillRect (b);
-        if (! simple)
-        {
-            Random rng (20261122);
-            for (int i = 0; i < 220; ++i)
-            {
-                const auto p = at (rng.nextFloat(), rng.nextFloat());
-                const float sz = 0.6f + rng.nextFloat() * 1.6f;
-                g.setColour (Colours::white.withAlpha (0.15f + rng.nextFloat() * 0.6f));
-                g.fillEllipse (Rectangle<float> (sz, sz).withCentre (p));
-            }
-        }
-        return;
-    }
-
-    auto glossyLayer = [&] (const Path& p, float topY, Colour top, Colour bottom, float rimAlpha)
+    auto vertical = [&] (std::initializer_list<std::pair<double, juce::uint32>> stops)
     {
-        g.setGradientFill (ColourGradient (top, 0, topY, bottom, 0, b.getBottom(), false));
-        g.fillPath (p);
-        g.setColour (Colours::white.withAlpha (rimAlpha));
-        g.strokePath (p, PathStrokeType (1.6f));
-        Graphics::ScopedSaveState ss (g);
-        g.reduceClipRegion (p);
-        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.26f), 0, topY, Colours::white.withAlpha (0.0f), 0, topY + h * 0.12f, false));
+        auto it = stops.begin();
+        ColourGradient grad (Colour (it->second), 0, b.getY(), Colour ((stops.end() - 1)->second), 0, b.getBottom(), false);
+        for (auto& st : stops) if (st.first > 0.0 && st.first < 1.0) grad.addColour (st.first, Colour (st.second));
+        g.setGradientFill (grad);
         g.fillRect (b);
     };
-    auto stars = [&] (int n, float maxY)
+    auto glow = [&] (juce::uint32 colour, float alpha, float fx, float fy, float rad)
     {
-        Random rng (777);
-        for (int i = 0; i < n; ++i)
-        {
-            const auto p = at (rng.nextFloat(), rng.nextFloat() * maxY);
-            const float sz = 0.6f + rng.nextFloat() * 1.7f;
-            g.setColour (Colours::white.withAlpha (0.2f + rng.nextFloat() * 0.7f));
-            g.fillEllipse (Rectangle<float> (sz, sz).withCentre (p));
-        }
-    };
-
-    if (mode == 2)
-    {   // ocean: sunlit water with ripples, a sandy floor and sea grass
-        ColourGradient sea (Colour (0xff46d2f0), 0, b.getY(), Colour (0xff021a33), 0, b.getBottom(), false);
-        sea.addColour (0.45, Colour (0xff0b67a0));
-        g.setGradientFill (sea); g.fillRect (b);
-        for (int k = 0; k < 4; ++k)
-        {   // ripples of light under the surface
-            Path rip;
-            const float y = b.getY() + h * (0.03f + 0.035f * (float) k);
-            rip.startNewSubPath (b.getX(), y);
-            for (int i = 1; i <= 12; ++i)
-                rip.quadraticTo (b.getX() + w * ((float) i - 0.5f) / 12.0f, y + ((i + k) % 2 == 0 ? 7.0f : -7.0f), b.getX() + w * (float) i / 12.0f, y);
-            g.setColour (Colours::white.withAlpha (0.22f - 0.04f * (float) k));
-            g.strokePath (rip, PathStrokeType (2.0f));
-        }
-        const auto floor = hill (b, 0.86f, { 0.04f, 0.07f, 0.03f, 0.06f });
-        glossyLayer (floor, b.getY() + h * 0.80f, Colour (0xffeed9a0), Colour (0xff9c7a3e), 0.4f);
-        if (simple) return;
-        Random rng (42);
-        for (int i = 0; i < 14; ++i)
-        {   // sea grass
-            const float x = b.getX() + w * rng.nextFloat(), base = b.getY() + h * (0.90f + 0.05f * rng.nextFloat());
-            const float len = h * (0.08f + 0.10f * rng.nextFloat()), sway = (rng.nextFloat() - 0.5f) * 40.0f;
-            Path blade;
-            blade.startNewSubPath (x, base);
-            blade.cubicTo (x + sway, base - len * 0.4f, x - sway, base - len * 0.7f, x + sway * 0.5f, base - len);
-            g.setColour (Colour (0xff2fbf6a).withAlpha (0.85f));
-            g.strokePath (blade, PathStrokeType (4.0f, PathStrokeType::curved, PathStrokeType::rounded));
-            g.setColour (Colour (0xffb6f24a).withAlpha (0.5f));
-            g.strokePath (blade, PathStrokeType (1.2f, PathStrokeType::curved, PathStrokeType::rounded));
-        }
-        return;
-    }
-    if (mode == 3)
-    {   // sunset beach: violet-to-gold sky, glossy sea, islands and sand
-        ColourGradient sky (Colour (0xff35196e), 0, b.getY(), Colour (0xffffc163), 0, b.getY() + h * 0.62f, false);
-        sky.addColour (0.55, Colour (0xffff5f8a));
-        g.setGradientFill (sky); g.fillRect (b);
-        const float horizon = b.getY() + h * 0.63f;
-        ColourGradient sea (Colour (0xffff9a7a), 0, horizon, Colour (0xff1a1450), 0, b.getBottom(), false);
-        sea.addColour (0.35, Colour (0xff6a3a9a));
-        g.setGradientFill (sea);
-        g.fillRect (b.withTop (horizon));
-        Path isle; isle.addEllipse (Rectangle<float> (w * 0.22f, h * 0.06f).withCentre (at (0.12f, 0.635f)));
-        isle.addEllipse (Rectangle<float> (w * 0.12f, h * 0.04f).withCentre (at (0.86f, 0.632f)));
-        { Graphics::ScopedSaveState ss (g); g.reduceClipRegion (Rectangle<int> ((int) b.getX(), (int) b.getY(), (int) w, (int) (horizon - b.getY()))); g.setColour (Colour (0xff3a1650)); g.fillPath (isle); }
-        const auto sand = hill (b, 0.90f, { 0.03f, 0.08f, 0.05f });
-        glossyLayer (sand, b.getY() + h * 0.84f, Colour (0xffffd9a0), Colour (0xffc07a4a), 0.45f);
-        return;
-    }
-    if (mode == 4)
-    {   // aurora night: stars, ribbons of aurora, snowy mountains
-        ColourGradient sky (Colour (0xff020614), 0, b.getY(), Colour (0xff17357a), 0, b.getBottom(), false);
-        sky.addColour (0.6, Colour (0xff0b1d4a));
-        g.setGradientFill (sky); g.fillRect (b);
-        stars (simple ? 60 : 240, 0.75f);
-        struct Ribbon { float y, amp, phase, thick; Colour c; };
-        const Ribbon ribbons[] = { { 0.22f, 0.07f, 0.0f, 0.20f, Colour (0xff4dffb0) }, { 0.32f, 0.05f, 1.8f, 0.16f, Colour (0xff3fd8ff) },
-                                   { 0.16f, 0.06f, 3.1f, 0.12f, Colour (0xffc08cff) } };
-        for (auto& rb : ribbons)
-        {
-            Path band;
-            const int n = 24;
-            for (int i = 0; i <= n; ++i)
-            {
-                const float t = (float) i / (float) n;
-                const auto p = at (t, rb.y + rb.amp * std::sin (t * 6.0f + rb.phase));
-                if (i == 0) band.startNewSubPath (p); else band.lineTo (p);
-            }
-            for (int i = n; i >= 0; --i)
-            {
-                const float t = (float) i / (float) n;
-                band.lineTo (at (t, rb.y - rb.thick + rb.amp * 0.6f * std::sin (t * 6.0f + rb.phase + 0.6f)));
-            }
-            band.closeSubPath();
-            const float yb = b.getY() + h * rb.y;
-            ColourGradient glow (rb.c.withAlpha (0.0f), 0, yb - h * rb.thick, rb.c.withAlpha (0.0f), 0, yb + h * rb.amp, false);
-            glow.addColour (0.7, rb.c.withAlpha (0.5f));
-            g.setGradientFill (glow);
-            g.fillPath (band);
-        }
-        Path mtn;   // jagged mountains
-        mtn.startNewSubPath (b.getX(), b.getBottom());
-        const float peaks[] = { 0.80f, 0.62f, 0.74f, 0.55f, 0.70f, 0.60f, 0.78f, 0.66f, 0.82f };
-        for (int i = 0; i < 9; ++i) mtn.lineTo (at ((float) i / 8.0f, peaks[i]));
-        mtn.lineTo (b.getRight(), b.getBottom()); mtn.closeSubPath();
-        g.setGradientFill (ColourGradient (Colour (0xffeaf6ff), 0, b.getY() + h * 0.55f, Colour (0xff0c1a3e), 0, b.getY() + h * 0.80f, false));
-        g.fillPath (mtn);
-        g.setColour (Colours::white.withAlpha (0.4f)); g.strokePath (mtn, PathStrokeType (1.2f));
-        const auto snow = hill (b, 0.90f, { 0.03f, 0.05f, 0.02f, 0.04f });
-        glossyLayer (snow, b.getY() + h * 0.86f, Colour (0xffeaf6ff), Colour (0xff6f8fc8), 0.5f);
-        return;
-    }
-    if (mode == 5)
-    {   // meadow: bright sky, rolling hills with glossy round trees and flowers
-        ColourGradient sky (Colour (0xff2f9cf0), 0, b.getY(), Colour (0xfff0fff0), 0, b.getY() + h * 0.66f, false);
-        sky.addColour (0.5, Colour (0xff8fd8ff));
-        g.setGradientFill (sky); g.fillRect (b);
-        const auto far = hill (b, 0.68f, { 0.05f, 0.09f, 0.04f, 0.08f, 0.05f });
-        glossyLayer (far, b.getY() + h * 0.60f, Colour (0xffb6ec7a), Colour (0xff4aa846), 0.35f);
-        if (! simple)
-        {   // glossy round trees on the far hills
-            Random rng (5);
-            for (int i = 0; i < 9; ++i)
-            {
-                const auto base = at (0.05f + 0.11f * (float) i + 0.03f * rng.nextFloat(), 0.66f + 0.03f * rng.nextFloat());
-                const float r = 12.0f + 10.0f * rng.nextFloat();
-                g.setColour (Colour (0xff6b4a2a)); g.fillRoundedRectangle (Rectangle<float> (base.x - 2.5f, base.y - r * 0.9f, 5.0f, r * 1.0f), 2.0f);
-                theme::drawOrb (g, { base.x, base.y - r * 1.4f }, r, Colour (0xff3fbf4a), true);
-            }
-        }
-        const auto near = hill (b, 0.82f, { 0.07f, 0.03f, 0.09f, 0.04f });
-        glossyLayer (near, b.getY() + h * 0.74f, Colour (0xff8fe84a), Colour (0xff1f7a2a), 0.4f);
-        if (simple) return;
-        Random fl (11);
-        for (int i = 0; i < 70; ++i)
-        {   // flowers
-            const auto p = at (fl.nextFloat(), 0.86f + 0.13f * fl.nextFloat());
-            const Colour c[] = { Colours::white, Colour (0xfffff07a), Colour (0xffffa8d8), Colour (0xffbfe6ff) };
-            g.setColour (c[i % 4].withAlpha (0.9f));
-            g.fillEllipse (Rectangle<float> (4.5f, 4.5f).withCentre (p));
-        }
-        return;
-    }
-
-    // sky and nature: deep blue sky over glossy green hills
-    g.setGradientFill ([&] {
-        ColourGradient sky (Colour (0xff0a5bc4), 0, b.getY(), Colour (0xffd6f6ff), 0, b.getY() + h * 0.76f, false);
-        sky.addColour (0.55, Colour (0xff4fb8ff));
-        return sky; }());
-    g.fillRect (b);
-    // hills: far, middle and near, each a glossy green with a bright rim
-    struct Layer { float base; std::vector<float> waves; Colour top, bottom; };
-    const Layer layers[] = { { 0.70f, { 0.06f, 0.10f, 0.04f, 0.09f, 0.05f }, Colour (0xff9fe87c), Colour (0xff3f9f52) },
-                             { 0.78f, { 0.09f, 0.03f, 0.11f, 0.05f }, Colour (0xff7fdc4c), Colour (0xff23863a) },
-                             { 0.88f, { 0.05f, 0.10f, 0.06f }, Colour (0xff6fd83c), Colour (0xff146b2a) } };
-    for (auto& l : layers)
-    {
-        const auto p = hill (b, l.base, l.waves);
-        g.setGradientFill (ColourGradient (l.top, 0, b.getY() + h * (l.base - 0.1f), l.bottom, 0, b.getBottom(), false));
-        g.fillPath (p);
-        g.setColour (Colours::white.withAlpha (0.35f));
-        g.strokePath (p, PathStrokeType (1.6f));
-        Graphics::ScopedSaveState ss (g);   // glossy band along the hilltop
-        g.reduceClipRegion (p);
-        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.28f), 0, b.getY() + h * (l.base - 0.1f), Colours::white.withAlpha (0.0f), 0, b.getY() + h * (l.base + 0.05f), false));
+        const Point<float> p (b.getX() + w * fx, b.getY() + h * fy);
+        g.setGradientFill (ColourGradient (Colour (colour).withAlpha (alpha), p.x, p.y, Colour (colour).withAlpha (0.0f), p.x + jmax (w, h) * rad, p.y, true));
         g.fillRect (b);
+    };
+    switch (mode)
+    {
+        case 1:   // colour void: soft colour glows around a deep, dark centre
+            g.setColour (Colour (0xff06030f)); g.fillRect (b);
+            glow (0xffff3fb4, 0.70f, 0.08f, 0.22f, 0.55f);
+            glow (0xff7a3cff, 0.80f, 0.85f, 0.10f, 0.60f);
+            glow (0xff1fd2ff, 0.65f, 0.78f, 0.95f, 0.55f);
+            glow (0xffff8a3d, 0.45f, 0.18f, 1.00f, 0.45f);
+            glow (0xffb6f24a, 0.22f, 1.00f, 0.55f, 0.35f);
+            glow (0xff3a5bff, 0.40f, 0.45f, 0.00f, 0.40f);
+            glow (0xff020106, 0.92f, 0.50f, 0.52f, 0.42f);
+            break;
+        case 2:   // ocean: bright surface water down to the deep, with a hint of sand at the bottom
+            vertical ({ { 0.0, 0xff46d2f0 }, { 0.45, 0xff0b67a0 }, { 0.84, 0xff03223f }, { 1.0, 0xff6e6040 } });
+            break;
+        case 3:   // sunset beach: violet sky, pink and gold at the horizon, violet sea, warm sand
+            vertical ({ { 0.0, 0xff35196e }, { 0.45, 0xffff5f8a }, { 0.62, 0xffffc163 }, { 0.66, 0xffff9a7a },
+                        { 0.82, 0xff6a3a9a }, { 0.94, 0xff1a1450 }, { 1.0, 0xff8a5a4a } });
+            break;
+        case 4:   // aurora night: night sky with soft green, aqua and violet glows up high
+            vertical ({ { 0.0, 0xff020614 }, { 0.6, 0xff0b1d4a }, { 1.0, 0xff2a4a8a } });
+            glow (0xff4dffb0, 0.35f, 0.25f, 0.18f, 0.45f);
+            glow (0xff3fd8ff, 0.25f, 0.65f, 0.28f, 0.40f);
+            glow (0xffc08cff, 0.28f, 0.88f, 0.12f, 0.35f);
+            break;
+        case 5:   // meadow: bright sky into fresh green
+            vertical ({ { 0.0, 0xff2f9cf0 }, { 0.5, 0xff8fd8ff }, { 0.64, 0xffeaffea }, { 0.74, 0xffb6ec7a }, { 1.0, 0xff1f7a2a } });
+            break;
+        default:  // sky and nature: deep blue sky, pale horizon, green below
+            vertical ({ { 0.0, 0xff0a5bc4 }, { 0.55, 0xff4fb8ff }, { 0.72, 0xffd6f6ff }, { 0.80, 0xff9fe87c }, { 1.0, 0xff146b2a } });
+            break;
     }
 }
 
