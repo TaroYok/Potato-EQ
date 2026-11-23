@@ -842,33 +842,6 @@ void theme::setUiFont (int index)
 // ---------------------------------------------------------------- scenes behind the glass
 namespace
 {
-void drawBubble (Graphics& g, Point<float> c, float r, Colour tint)
-{
-    auto body = Rectangle<float> (2 * r, 2 * r).withCentre (c);
-    g.setGradientFill (ColourGradient (tint.withAlpha (0.02f), c.x, c.y, tint.withAlpha (0.35f), c.x + r, c.y, true));
-    g.fillEllipse (body);
-    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.8f), c.x, c.y - r, tint.withAlpha (0.45f), c.x, c.y + r, false));
-    g.drawEllipse (body, r > 20 ? 1.5f : 1.0f);
-    auto hl = Rectangle<float> (r * 0.95f, r * 0.55f).withCentre ({ c.x - r * 0.22f, c.y - r * 0.48f });
-    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.85f), hl.getCentreX(), hl.getY(), Colours::white.withAlpha (0.0f), hl.getCentreX(), hl.getBottom(), false));
-    g.fillEllipse (hl);
-    g.setColour (Colours::white.withAlpha (0.7f));
-    g.fillEllipse (Rectangle<float> (r * 0.16f, r * 0.16f).withCentre ({ c.x + r * 0.5f, c.y + r * 0.5f }));
-}
-
-void drawCloud (Graphics& g, Point<float> c, float s, Colour top = Colours::white, Colour bottom = Colour (0xffcfe9ff))
-{
-    const float puffs[][3] = { { 0, 0, 1.0f }, { -0.95f, 0.22f, 0.68f }, { 0.95f, 0.2f, 0.74f }, { -0.42f, -0.38f, 0.66f },
-                               { 0.45f, -0.32f, 0.72f }, { -1.6f, 0.38f, 0.42f }, { 1.6f, 0.36f, 0.46f } };
-    Path cloud;
-    for (auto& p : puffs)
-        cloud.addEllipse (Rectangle<float> (s * p[2] * 2.0f, s * p[2] * 1.7f).withCentre ({ c.x + s * p[0], c.y + s * p[1] }));
-    g.setColour (Colour (0xff2a6fb8).withAlpha (0.12f));   // soft shadow
-    g.fillPath (cloud, AffineTransform::translation (0, s * 0.18f));
-    g.setGradientFill (ColourGradient (top.withAlpha (0.97f), c.x, c.y - s, bottom.withAlpha (0.88f), c.x, c.y + s * 0.8f, false));
-    g.fillPath (cloud);
-}
-
 Path hill (Rectangle<float> b, float base, const std::vector<float>& waves)
 {
     Path p;
@@ -919,8 +892,6 @@ void theme::paintScene (Graphics& g, Rectangle<float> b, int mode, bool simple)
                 g.setColour (Colours::white.withAlpha (0.15f + rng.nextFloat() * 0.6f));
                 g.fillEllipse (Rectangle<float> (sz, sz).withCentre (p));
             }
-            for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.10f, 0.80f, 34 }, { 0.92f, 0.70f, 26 }, { 0.62f, 0.12f, 18 }, { 0.30f, 0.15f, 12 } })
-                drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xff9be7ff));
         }
         return;
     }
@@ -947,24 +918,9 @@ void theme::paintScene (Graphics& g, Rectangle<float> b, int mode, bool simple)
             g.fillEllipse (Rectangle<float> (sz, sz).withCentre (p));
         }
     };
-    auto shafts = [&] (Point<float> from, int n, float spread, float alpha)
-    {
-        for (int i = 0; i < n; ++i)
-        {
-            const float a = MathConstants<float>::halfPi + spread * ((float) i / (float) jmax (1, n - 1) - 0.5f);
-            Path ray;
-            ray.startNewSubPath (from + Point<float> (-14.0f, 0));
-            ray.lineTo (from + Point<float> (14.0f, 0));
-            ray.lineTo (from + Point<float> (std::cos (a + 0.03f), std::sin (a + 0.03f)) * h * 1.2f);
-            ray.lineTo (from + Point<float> (std::cos (a - 0.03f), std::sin (a - 0.03f)) * h * 1.2f);
-            ray.closeSubPath();
-            g.setGradientFill (ColourGradient (Colours::white.withAlpha (alpha), from.x, from.y, Colours::white.withAlpha (0.0f), from.x, from.y + h * 0.9f, false));
-            g.fillPath (ray);
-        }
-    };
 
     if (mode == 2)
-    {   // ocean: sunlit water, light shafts, a sandy floor with sea grass, and rising bubbles
+    {   // ocean: sunlit water with ripples, a sandy floor and sea grass
         ColourGradient sea (Colour (0xff46d2f0), 0, b.getY(), Colour (0xff021a33), 0, b.getBottom(), false);
         sea.addColour (0.45, Colour (0xff0b67a0));
         g.setGradientFill (sea); g.fillRect (b);
@@ -978,8 +934,6 @@ void theme::paintScene (Graphics& g, Rectangle<float> b, int mode, bool simple)
             g.setColour (Colours::white.withAlpha (0.22f - 0.04f * (float) k));
             g.strokePath (rip, PathStrokeType (2.0f));
         }
-        shafts (at (0.30f, -0.05f), 6, 0.9f, 0.10f);
-        shafts (at (0.75f, -0.05f), 5, 0.7f, 0.08f);
         const auto floor = hill (b, 0.86f, { 0.04f, 0.07f, 0.03f, 0.06f });
         glossyLayer (floor, b.getY() + h * 0.80f, Colour (0xffeed9a0), Colour (0xff9c7a3e), 0.4f);
         if (simple) return;
@@ -996,50 +950,23 @@ void theme::paintScene (Graphics& g, Rectangle<float> b, int mode, bool simple)
             g.setColour (Colour (0xffb6f24a).withAlpha (0.5f));
             g.strokePath (blade, PathStrokeType (1.2f, PathStrokeType::curved, PathStrokeType::rounded));
         }
-        for (int col = 0; col < 7; ++col)
-        {   // columns of rising bubbles
-            const float x = 0.06f + 0.14f * (float) col + 0.03f * rng.nextFloat();
-            for (int k = 0; k < 6; ++k)
-                drawBubble (g, at (x + 0.01f * std::sin ((float) k * 1.7f), 0.85f - 0.13f * (float) k - 0.05f * rng.nextFloat()), 3.0f + 3.0f * (float) k * rng.nextFloat(), Colour (0xffbff8ff));
-        }
-        for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.22f, 0.35f, 46 }, { 0.62f, 0.55f, 60 }, { 0.86f, 0.25f, 30 } })
-            drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xffbff8ff));
         return;
     }
     if (mode == 3)
-    {   // sunset beach: violet-to-gold sky, a big low sun, glossy sea with its reflection, islands and sand
+    {   // sunset beach: violet-to-gold sky, glossy sea, islands and sand
         ColourGradient sky (Colour (0xff35196e), 0, b.getY(), Colour (0xffffc163), 0, b.getY() + h * 0.62f, false);
         sky.addColour (0.55, Colour (0xffff5f8a));
         g.setGradientFill (sky); g.fillRect (b);
-        const auto sun = at (0.5f, 0.50f);
-        g.setGradientFill (ColourGradient (Colour (0xfffff0a0).withAlpha (0.8f), sun.x, sun.y, Colour (0xffff8a3d).withAlpha (0.0f), sun.x + w * 0.45f, sun.y, true));
-        g.fillRect (b);
-        g.setGradientFill (ColourGradient (Colour (0xfffff6c8), sun.x, sun.y - w * 0.09f, Colour (0xffff8a3d), sun.x, sun.y + w * 0.09f, false));
-        g.fillEllipse (Rectangle<float> (w * 0.18f, w * 0.18f).withCentre (sun));
-        const float s = jmin (w, h);
-        drawCloud (g, at (0.20f, 0.22f), s * 0.06f, Colour (0xffffd6e6), Colour (0xffd06a9a));
-        drawCloud (g, at (0.78f, 0.15f), s * 0.05f, Colour (0xffffd6e6), Colour (0xffd06a9a));
         const float horizon = b.getY() + h * 0.63f;
         ColourGradient sea (Colour (0xffff9a7a), 0, horizon, Colour (0xff1a1450), 0, b.getBottom(), false);
         sea.addColour (0.35, Colour (0xff6a3a9a));
         g.setGradientFill (sea);
         g.fillRect (b.withTop (horizon));
-        Random rng (9);
-        for (int i = 0; i < 26; ++i)
-        {   // sun glitter on the water
-            const float y = horizon + 4.0f + (h * 0.3f) * (float) i / 26.0f;
-            const float half = w * (0.02f + 0.10f * (float) i / 26.0f) * (0.5f + rng.nextFloat());
-            g.setColour (Colour (0xfffff0b0).withAlpha (0.55f - 0.015f * (float) i));
-            g.fillRoundedRectangle (Rectangle<float> (sun.x - half + (rng.nextFloat() - 0.5f) * 30.0f, y, half * 2.0f, 2.2f), 1.1f);
-        }
         Path isle; isle.addEllipse (Rectangle<float> (w * 0.22f, h * 0.06f).withCentre (at (0.12f, 0.635f)));
         isle.addEllipse (Rectangle<float> (w * 0.12f, h * 0.04f).withCentre (at (0.86f, 0.632f)));
         { Graphics::ScopedSaveState ss (g); g.reduceClipRegion (Rectangle<int> ((int) b.getX(), (int) b.getY(), (int) w, (int) (horizon - b.getY()))); g.setColour (Colour (0xff3a1650)); g.fillPath (isle); }
         const auto sand = hill (b, 0.90f, { 0.03f, 0.08f, 0.05f });
         glossyLayer (sand, b.getY() + h * 0.84f, Colour (0xffffd9a0), Colour (0xffc07a4a), 0.45f);
-        if (simple) return;
-        for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.08f, 0.40f, 28 }, { 0.32f, 0.30f, 16 }, { 0.70f, 0.42f, 40 }, { 0.93f, 0.50f, 18 } })
-            drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xffffd0e8));
         return;
     }
     if (mode == 4)
@@ -1083,23 +1010,13 @@ void theme::paintScene (Graphics& g, Rectangle<float> b, int mode, bool simple)
         g.setColour (Colours::white.withAlpha (0.4f)); g.strokePath (mtn, PathStrokeType (1.2f));
         const auto snow = hill (b, 0.90f, { 0.03f, 0.05f, 0.02f, 0.04f });
         glossyLayer (snow, b.getY() + h * 0.86f, Colour (0xffeaf6ff), Colour (0xff6f8fc8), 0.5f);
-        if (simple) return;
-        for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.10f, 0.50f, 26 }, { 0.55f, 0.45f, 38 }, { 0.88f, 0.40f, 20 } })
-            drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xffa8ffd8));
         return;
     }
     if (mode == 5)
-    {   // meadow: bright sky, sunbeams, rolling hills with glossy round trees and flowers
+    {   // meadow: bright sky, rolling hills with glossy round trees and flowers
         ColourGradient sky (Colour (0xff2f9cf0), 0, b.getY(), Colour (0xfff0fff0), 0, b.getY() + h * 0.66f, false);
         sky.addColour (0.5, Colour (0xff8fd8ff));
         g.setGradientFill (sky); g.fillRect (b);
-        const auto sun = at (0.12f, 0.06f);
-        g.setGradientFill (ColourGradient (Colour (0xfffffbd0).withAlpha (0.95f), sun.x, sun.y, Colour (0xfffff2a0).withAlpha (0.0f), sun.x + w * 0.35f, sun.y, true));
-        g.fillRect (b);
-        shafts (sun, 8, 1.4f, 0.09f);
-        const float s = jmin (w, h);
-        drawCloud (g, at (0.45f, 0.16f), s * 0.06f);
-        drawCloud (g, at (0.80f, 0.26f), s * 0.07f);
         const auto far = hill (b, 0.68f, { 0.05f, 0.09f, 0.04f, 0.08f, 0.05f });
         glossyLayer (far, b.getY() + h * 0.60f, Colour (0xffb6ec7a), Colour (0xff4aa846), 0.35f);
         if (! simple)
@@ -1124,40 +1041,15 @@ void theme::paintScene (Graphics& g, Rectangle<float> b, int mode, bool simple)
             g.setColour (c[i % 4].withAlpha (0.9f));
             g.fillEllipse (Rectangle<float> (4.5f, 4.5f).withCentre (p));
         }
-        for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.30f, 0.40f, 34 }, { 0.62f, 0.48f, 22 }, { 0.92f, 0.52f, 30 }, { 0.20f, 0.18f, 12 } })
-            drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xffc8f5ff));
         return;
     }
 
-    // sky and nature: deep blue sky, sun, clouds, glossy green hills and bubbles
+    // sky and nature: deep blue sky over glossy green hills
     g.setGradientFill ([&] {
         ColourGradient sky (Colour (0xff0a5bc4), 0, b.getY(), Colour (0xffd6f6ff), 0, b.getY() + h * 0.76f, false);
         sky.addColour (0.55, Colour (0xff4fb8ff));
         return sky; }());
     g.fillRect (b);
-    const auto sun = at (0.86f, 0.08f);
-    g.setGradientFill (ColourGradient (Colour (0xfffffbe0).withAlpha (0.95f), sun.x, sun.y, Colour (0xfffff2b0).withAlpha (0.0f), sun.x + w * 0.38f, sun.y, true));
-    g.fillRect (b);
-    for (int i = 0; i < 10; ++i)
-    {   // sun rays
-        const float a = MathConstants<float>::pi * (0.52f + 0.075f * (float) i);
-        Path ray;
-        ray.startNewSubPath (sun);
-        ray.lineTo (sun + Point<float> (std::cos (a - 0.018f), std::sin (a - 0.018f)) * w * 1.3f);
-        ray.lineTo (sun + Point<float> (std::cos (a + 0.018f), std::sin (a + 0.018f)) * w * 1.3f);
-        ray.closeSubPath();
-        g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.16f), sun.x, sun.y, Colours::white.withAlpha (0.0f), sun.x - w * 0.6f, sun.y + h * 0.7f, false));
-        g.fillPath (ray);
-    }
-    const float s = jmin (w, h);
-    drawCloud (g, at (0.18f, 0.20f), s * 0.07f);
-    drawCloud (g, at (0.52f, 0.12f), s * 0.05f);
-    if (! simple)
-    {
-        drawCloud (g, at (0.70f, 0.34f), s * 0.06f);
-        drawCloud (g, at (0.34f, 0.42f), s * 0.045f);
-        drawCloud (g, at (0.95f, 0.46f), s * 0.05f);
-    }
     // hills: far, middle and near, each a glossy green with a bright rim
     struct Layer { float base; std::vector<float> waves; Colour top, bottom; };
     const Layer layers[] = { { 0.70f, { 0.06f, 0.10f, 0.04f, 0.09f, 0.05f }, Colour (0xff9fe87c), Colour (0xff3f9f52) },
@@ -1175,11 +1067,6 @@ void theme::paintScene (Graphics& g, Rectangle<float> b, int mode, bool simple)
         g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.28f), 0, b.getY() + h * (l.base - 0.1f), Colours::white.withAlpha (0.0f), 0, b.getY() + h * (l.base + 0.05f), false));
         g.fillRect (b);
     }
-    if (simple) return;
-    for (auto& bb : std::initializer_list<std::array<float, 3>> { { 0.05f, 0.62f, 30 }, { 0.12f, 0.50f, 12 }, { 0.30f, 0.60f, 52 }, { 0.47f, 0.30f, 20 },
-                                                               { 0.58f, 0.55f, 64 }, { 0.71f, 0.22f, 10 }, { 0.66f, 0.70f, 32 }, { 0.83f, 0.58f, 44 },
-                                                               { 0.96f, 0.30f, 22 }, { 0.40f, 0.06f, 9 }, { 0.22f, 0.84f, 18 }, { 0.88f, 0.86f, 14 } })
-        drawBubble (g, at (bb[0], bb[1]), bb[2], Colour (0xff9be7ff));
 }
 
 // ---------------------------------------------------------------- icon buttons and the module dock
